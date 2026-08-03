@@ -813,6 +813,14 @@ emit_initial_rows() {
     emit_rows_for_mode
 }
 
+# LOCAL PATCH (not upstream): this popup's geometry is computed exactly, so it
+# cannot inherit the user's interactive fzf preferences. FZF_DEFAULT_OPTS is
+# applied before argv, and a `--border` in there makes fzf draw a second frame
+# (plus a scrollbar gutter) inside tmux's popup border - 2 rows and ~3 columns
+# the size calculation knows nothing about, so the list scrolls and the header
+# clips. Drop the inherited options; every flag this picker wants is explicit.
+unset FZF_DEFAULT_OPTS FZF_DEFAULT_OPTS_FILE
+
 selected=$(emit_initial_rows | fzf \
     --ansi \
     --delimiter=$'\t' \
@@ -834,6 +842,8 @@ selected=$(emit_initial_rows | fzf \
     --layout=reverse \
     --info=hidden \
     --no-separator \
+    --no-border \
+    --no-scrollbar \
     --height=100% \
     --margin=0 \
     --padding=0)
