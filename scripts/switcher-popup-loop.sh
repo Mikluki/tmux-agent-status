@@ -49,54 +49,71 @@ while true; do
     mode=$(<"$state_dir/mode")
     preview_hidden=$(<"$state_dir/preview-hidden")
 
-    # When preview is hidden, use the original fixed 60×14 popup — that
-    # size worked well in practice. When preview is visible we need room
-    # for the 65%-wide preview pane, so use a percent of the screen.
-    # LOCAL PATCH (not upstream): popup size was hardcoded. Read it from
-    # tmux.conf so the knob lives in user-owned config.
+    # LOCAL PATCH (not upstream): popup size was hardcoded (75%x60%, or a fixed
+    # 60x14 once the preview was hidden). Both are computed here now, and the
+    # row list that drives the computation is handed to the inner script as a
+    # seed so it is not rebuilt - that sweep is 0.2-0.4s on a busy server.
+    autosize=$(tmux show-option -gqv "@agent-switcher-popup-autosize" 2>/dev/null)
+    rows=""
+    if [ "$mode" = "agents" ] && [ "$autosize" != "off" ]; then
+        "$INNER" --rows-agents > "$state_dir/rows.seed" 2>/dev/null || :
+        rows=$(wc -l < "$state_dir/rows.seed")
+    fi
+
+    prev_lines=""
+
     if [ "$preview_hidden" = "1" ]; then
+        # Bare: the list is all there is, so the box is exactly the list.
         W=$(tmux show-option -gqv "@agent-switcher-popup-width-bare" 2>/dev/null)
         H=$(tmux show-option -gqv "@agent-switcher-popup-height-bare" 2>/dev/null)
         [ -z "$W" ] && W=60
         [ -z "$H" ] && H=14
 
-        # LOCAL PATCH (not upstream): the bare popup was a fixed box holding a
-        # much smaller list — 5 agents in a 16-row frame left 7 blank rows. In
-        # the flat agents view the row count is known before launch and cannot
-        # change while the popup is open, so size the box to it.
-        #
-        # Tree mode is deliberately excluded: `tab` expands a session in place
-        # and a tmux popup cannot be resized in flight, so it keeps the fixed
-        # height and has somewhere to grow into.
-        autosize=$(tmux show-option -gqv "@agent-switcher-popup-autosize" 2>/dev/null)
-        if [ "$mode" = "agents" ] && [ "$autosize" != "off" ]; then
+        if [ -n "$rows" ]; then
             hmin=$(tmux show-option -gqv "@agent-switcher-popup-height-min" 2>/dev/null)
             hmax=$(tmux show-option -gqv "@agent-switcher-popup-height-max" 2>/dev/null)
             [ -z "$hmin" ] && hmin=6
             [ -z "$hmax" ] && hmax=20
-
-            # Keep the rows we just computed: the inner script picks the seed
-            # up as fzf's initial input, so sizing the box costs no extra
-            # ps/tmux sweep (that sweep is 0.2-0.4s on a busy server).
-            "$INNER" --rows-agents > "$state_dir/rows.seed" 2>/dev/null || :
-            rows=$(wc -l < "$state_dir/rows.seed")
             # popup border 2 + fzf header 1 + prompt 1
             H=$((rows + 4))
             [ "$H" -lt "$hmin" ] && H=$hmin
             [ "$H" -gt "$hmax" ] && H=$hmax
         fi
     else
+        # Preview: two stacked bands, list on top and pane capture below. The
+        # list band is still exactly the list, so the popup is only as tall as
+        # it needs to be and the preview gets a fixed, predictable slice rather
+        # than a percentage that swings with the agent count.
         W=$(tmux show-option -gqv "@agent-switcher-popup-width" 2>/dev/null)
         H=$(tmux show-option -gqv "@agent-switcher-popup-height" 2>/dev/null)
         [ -z "$W" ] && W="75%"
         [ -z "$H" ] && H="60%"
+
+        prev_lines=$(tmux show-option -gqv "@agent-switcher-preview-lines" 2>/dev/null)
+        [ -z "$prev_lines" ] && prev_lines=20
+
+        if [ -n "$rows" ]; then
+            # + preview band and its border-top, on top of the bare chrome
+            H=$((rows + 4 + prev_lines + 1))
+
+            # Do not outgrow the client: shrink the preview band, not the list.
+            client_h=$(tmux display-message -p '#{client_height}' 2>/dev/null) || client_h=""
+            case "$client_h" in
+                ''|*[!0-9]*) client_h=0 ;;
+            esac
+            if [ "$client_h" -gt 8 ] && [ "$H" -gt $((client_h - 2)) ]; then
+                H=$((client_h - 2))
+                prev_lines=$((H - rows - 5))
+                [ "$prev_lines" -lt 4 ] && prev_lines=4
+            fi
+        fi
     fi
 
     tmux display-popup -E \
         -w "$W" -h "$H" \
         -T " Switch Pane " \
         -S fg=colour250 -s fg=colour250 \
-        "env TMUX_AGENT_SWITCHER_STATE_DIR='$state_dir' '$INNER'" \
+        "env TMUX_AGENT_SWITCHER_STATE_DIR='$state_dir' TMUX_AGENT_PREVIEW_LINES='$prev_lines' '$INNER'" \
         || true
 
     [ -f "$state_dir/relaunch" ] || break

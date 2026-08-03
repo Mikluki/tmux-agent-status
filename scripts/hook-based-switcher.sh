@@ -60,12 +60,60 @@ EXPANDED_SESSIONS_FILE=""
 EXPANDED_WINDOWS_FILE=""
 MODE_FILE=""
 
-# LOCAL PATCH (not upstream): preview width was hardcoded at 65% in three
-# places, which left the list column too narrow to read session:window.pane
-# plus the agent badge without truncating. Read it from tmux.conf instead so
-# the knob lives in user-owned config.
-PREVIEW_WIDTH=$(tmux show-option -gqv "@agent-switcher-preview-width" 2>/dev/null)
-[ -z "$PREVIEW_WIDTH" ] && PREVIEW_WIDTH="65%"
+# LOCAL PATCH (not upstream): the preview window was hardcoded as
+# "right,65%,border-left,wrap" in three places. Two problems: the 65% left the
+# list column too narrow to read a row without truncating, and side-by-side is
+# the wrong split for this content - the list is ~33 columns while agent output
+# wants the full width. Stack it instead (list on top, preview below) and read
+# both position and size from tmux.conf.
+#
+# Down-position size comes from the popup loop via TMUX_AGENT_PREVIEW_LINES,
+# because the loop is what sized the popup and so knows how many lines are
+# actually left over; @agent-switcher-preview-lines is the standalone fallback.
+PREVIEW_POS=$(tmux show-option -gqv "@agent-switcher-preview-position" 2>/dev/null)
+[ -z "$PREVIEW_POS" ] && PREVIEW_POS="down"
+
+preview_window_spec() {
+    local size border
+    if [ "$PREVIEW_POS" = "right" ]; then
+        size=$(tmux show-option -gqv "@agent-switcher-preview-width" 2>/dev/null)
+        [ -z "$size" ] && size="55%"
+        border="border-left"
+    else
+        size="${TMUX_AGENT_PREVIEW_LINES:-}"
+        [ -z "$size" ] && size=$(tmux show-option -gqv "@agent-switcher-preview-lines" 2>/dev/null)
+        [ -z "$size" ] && size=20
+        border="border-top"
+    fi
+    # nowrap: see preview_tail_lines - it is what makes "newest line is the
+    # bottom line" exact rather than approximate.
+    # noinfo: the capture is tailed to exactly the band height, so fzf's scroll
+    # counter would read "1/N" forever - pure noise in the corner.
+    printf '%s,%s,%s,nowrap,noinfo' "$PREVIEW_POS" "$size" "$border"
+}
+
+# LOCAL PATCH (not upstream): the preview showed the WRONG END of the pane.
+# `capture-pane -S -120` returns ~174 lines and fzf renders a preview from its
+# first line, so the band showed scrollback from ~150 lines ago rather than what
+# the agent is doing now - useless for a status glance. fzf cannot be told to
+# scroll to the end (a large +offset clamps with the last line at the TOP of the
+# band, showing one line over blanks), so tail the capture to the band height
+# instead. With nowrap one captured line is one row, so the newest line always
+# lands on the bottom row.
+preview_tail_lines() {
+    local n=""
+    if [ "$PREVIEW_POS" = "right" ]; then
+        # Right-hand preview is full popup height; we are running inside the
+        # popup, so the terminal knows it.
+        n=$(tput lines 2>/dev/null) || n=""
+    else
+        n="${TMUX_AGENT_PREVIEW_LINES:-}"
+        [ -z "$n" ] && n=$(tmux show-option -gqv "@agent-switcher-preview-lines" 2>/dev/null)
+    fi
+    case "$n" in ''|*[!0-9]*) n=20 ;; esac
+    [ "$n" -lt 1 ] && n=1
+    printf '%s' "$n"
+}
 
 configure_state_dir() {
     SWITCHER_STATE_DIR="$1"
@@ -637,8 +685,8 @@ case "${SWITCHER_COMMAND:-}" in
                 printf "execute-silent(bash %q --state-dir %q --request-relaunch toggle-preview)+abort\n" \
                     "$0" "$SWITCHER_STATE_DIR"
             else
-                printf 'change-preview-window(right,%s,border-left,wrap|right,%s,border-left,wrap,hidden)\n' \
-                    "$PREVIEW_WIDTH" "$PREVIEW_WIDTH"
+                printf 'change-preview-window(%s|%s,hidden)\n' \
+                    "$(preview_window_spec)" "$(preview_window_spec)"
             fi
         else
             printf "execute-silent(bash %q --state-dir %q --toggle-expand {2} {1})+reload(bash %q --state-dir %q --rows)\n" \
@@ -650,7 +698,7 @@ case "${SWITCHER_COMMAND:-}" in
         # Used only by the in-process ctrl-f flow (window display-method).
         # Wrapped popup uses --request-relaunch instead.
         if [ "$(current_mode)" = "agents" ]; then
-            printf 'change-preview-window(right,%s,border-left,wrap)\n' "$PREVIEW_WIDTH"
+            printf 'change-preview-window(%s)\n' "$(preview_window_spec)"
         else
             printf 'change-preview-window(hidden)\n'
         fi
@@ -809,24 +857,27 @@ else
     preview_hidden_flag=""
 fi
 
-# ctrl-f binding: when wrapped by popup-loop, abort + relaunch with new
-# popup geometry; otherwise toggle in-place (window display-method).
+# ctrl-f binding. LOCAL PATCH (not upstream): this used to toggle tree/flat.
+# The tree view is retired - with both views filtered to agent panes it showed
+# the same agents as the flat list, one level deeper and behind an expand step,
+# and its non-agent pane rows were noise. So there is only one view now, and
+# ctrl-f is an alias for tab (preview on/off) rather than a dead key, since
+# that is where the muscle memory already points.
+#
+# Nothing switches modes any more, so the mode machinery below stays pinned at
+# whatever @agent-switcher-default-mode says. It is left intact rather than
+# excised to keep this a small, revertible diff against upstream.
 if [ -n "${TMUX_AGENT_SWITCHER_STATE_DIR:-}" ]; then
-    ctrl_f_bind="execute-silent(bash '$0' --state-dir '$state_dir' --request-relaunch toggle-mode)+abort"
+    ctrl_f_bind="execute-silent(bash '$0' --state-dir '$state_dir' --request-relaunch toggle-preview)+abort"
 else
-    ctrl_f_bind="execute-silent(bash '$0' --state-dir '$state_dir' --toggle-mode)+reload(bash '$0' --state-dir '$state_dir' --rows)+transform(bash '$0' --state-dir '$state_dir' --preview-action)"
+    ctrl_f_bind="transform(bash '$0' --state-dir '$state_dir' --tab-action)"
 fi
 
 # LOCAL PATCH (not upstream): the key hints were one 85-column string, which
 # tmux clipped to "ctrl-w wai··" in the compact popup, and it described both
 # views at once ("tab expand/preview") so half of it was wrong either way.
-# Build it per mode, in the same C-x notation tmux.conf uses, short enough to
-# survive the box.
-if [ "$(current_mode)" = "agents" ]; then
-    header_hint='tab preview  C-f tree  C-x close  C-p park  C-w wait  C-r reset'
-else
-    header_hint='tab expand  C-f flat  C-x close  C-p park  C-w wait  C-r reset'
-fi
+# One view left, so one honest hint line, in the C-x notation tmux.conf uses.
+header_hint='tab/C-f preview  C-x close  C-p park  C-w wait  C-r reset'
 
 # LOCAL PATCH (not upstream): when the popup wrapper sized the box it already
 # built the row list, so consume that instead of sweeping ps/tmux a second time
@@ -856,8 +907,8 @@ selected=$(emit_initial_rows | fzf \
     --with-nth=3.. \
     --no-sort \
     --listen="$socket" \
-    --preview='id={2}; tmux capture-pane -e -p -t "${id##*:}" -S -120 2>/dev/null' \
-    --preview-window="right,${PREVIEW_WIDTH},border-left,wrap${preview_hidden_flag}" \
+    --preview="id={2}; tmux capture-pane -e -p -t \"\${id##*:}\" -S -120 2>/dev/null | tail -n $(preview_tail_lines)" \
+    --preview-window="$(preview_window_spec)${preview_hidden_flag}" \
     --prompt='› ' \
     --header=$'\033[90m'"$header_hint"$'\033[0m' \
     --header-first \
