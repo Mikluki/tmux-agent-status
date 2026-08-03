@@ -788,7 +788,32 @@ else
     ctrl_f_bind="execute-silent(bash '$0' --state-dir '$state_dir' --toggle-mode)+reload(bash '$0' --state-dir '$state_dir' --rows)+transform(bash '$0' --state-dir '$state_dir' --preview-action)"
 fi
 
-selected=$(emit_rows_for_mode | fzf \
+# LOCAL PATCH (not upstream): the key hints were one 85-column string, which
+# tmux clipped to "ctrl-w wai··" in the compact popup, and it described both
+# views at once ("tab expand/preview") so half of it was wrong either way.
+# Build it per mode, in the same C-x notation tmux.conf uses, short enough to
+# survive the box.
+if [ "$(current_mode)" = "agents" ]; then
+    header_hint='tab preview  C-f tree  C-x close  C-p park  C-w wait  C-r reset'
+else
+    header_hint='tab expand  C-f flat  C-x close  C-p park  C-w wait  C-r reset'
+fi
+
+# LOCAL PATCH (not upstream): when the popup wrapper sized the box it already
+# built the row list, so consume that instead of sweeping ps/tmux a second time
+# before fzf can draw. Single-use: deleted on read, and every reload binding
+# still goes through --rows.
+emit_initial_rows() {
+    local seed="$state_dir/rows.seed"
+    if [ -f "$seed" ]; then
+        cat "$seed"
+        rm -f "$seed"
+        return 0
+    fi
+    emit_rows_for_mode
+}
+
+selected=$(emit_initial_rows | fzf \
     --ansi \
     --delimiter=$'\t' \
     --with-nth=3.. \
@@ -796,8 +821,8 @@ selected=$(emit_rows_for_mode | fzf \
     --listen="$socket" \
     --preview='id={2}; tmux capture-pane -e -p -t "${id##*:}" -S -120 2>/dev/null' \
     --preview-window="right,${PREVIEW_WIDTH},border-left,wrap${preview_hidden_flag}" \
-    --prompt="  " \
-    --header=$'\033[90mctrl-f mode  tab expand/preview  ctrl-x close  ctrl-p park  ctrl-w wait  ctrl-r reset\033[0m' \
+    --prompt='› ' \
+    --header=$'\033[90m'"$header_hint"$'\033[0m' \
     --header-first \
     --bind="ctrl-j:down,ctrl-k:up" \
     --bind="tab:transform(bash '$0' --state-dir '$state_dir' --tab-action)" \

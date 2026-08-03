@@ -36,7 +36,7 @@ case "$preview_default" in
 esac
 
 while true; do
-    rm -f "$state_dir/relaunch"
+    rm -f "$state_dir/relaunch" "$state_dir/rows.seed"
 
     mode=$(<"$state_dir/mode")
     preview_hidden=$(<"$state_dir/preview-hidden")
@@ -51,6 +51,32 @@ while true; do
         H=$(tmux show-option -gqv "@agent-switcher-popup-height-bare" 2>/dev/null)
         [ -z "$W" ] && W=60
         [ -z "$H" ] && H=14
+
+        # LOCAL PATCH (not upstream): the bare popup was a fixed box holding a
+        # much smaller list — 5 agents in a 16-row frame left 7 blank rows. In
+        # the flat agents view the row count is known before launch and cannot
+        # change while the popup is open, so size the box to it.
+        #
+        # Tree mode is deliberately excluded: `tab` expands a session in place
+        # and a tmux popup cannot be resized in flight, so it keeps the fixed
+        # height and has somewhere to grow into.
+        autosize=$(tmux show-option -gqv "@agent-switcher-popup-autosize" 2>/dev/null)
+        if [ "$mode" = "agents" ] && [ "$autosize" != "off" ]; then
+            hmin=$(tmux show-option -gqv "@agent-switcher-popup-height-min" 2>/dev/null)
+            hmax=$(tmux show-option -gqv "@agent-switcher-popup-height-max" 2>/dev/null)
+            [ -z "$hmin" ] && hmin=6
+            [ -z "$hmax" ] && hmax=20
+
+            # Keep the rows we just computed: the inner script picks the seed
+            # up as fzf's initial input, so sizing the box costs no extra
+            # ps/tmux sweep (that sweep is 0.2-0.4s on a busy server).
+            "$INNER" --rows-agents > "$state_dir/rows.seed" 2>/dev/null || :
+            rows=$(wc -l < "$state_dir/rows.seed")
+            # popup border 2 + fzf header 1 + prompt 1
+            H=$((rows + 4))
+            [ "$H" -lt "$hmin" ] && H=$hmin
+            [ "$H" -gt "$hmax" ] && H=$hmax
+        fi
     else
         W=$(tmux show-option -gqv "@agent-switcher-popup-width" 2>/dev/null)
         H=$(tmux show-option -gqv "@agent-switcher-popup-height" 2>/dev/null)
