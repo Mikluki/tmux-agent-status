@@ -60,6 +60,13 @@ EXPANDED_SESSIONS_FILE=""
 EXPANDED_WINDOWS_FILE=""
 MODE_FILE=""
 
+# LOCAL PATCH (not upstream): preview width was hardcoded at 65% in three
+# places, which left the list column too narrow to read session:window.pane
+# plus the agent badge without truncating. Read it from tmux.conf instead so
+# the knob lives in user-owned config.
+PREVIEW_WIDTH=$(tmux show-option -gqv "@agent-switcher-preview-width" 2>/dev/null)
+[ -z "$PREVIEW_WIDTH" ] && PREVIEW_WIDTH="65%"
+
 configure_state_dir() {
     SWITCHER_STATE_DIR="$1"
     [ -n "$SWITCHER_STATE_DIR" ] || return 0
@@ -191,10 +198,17 @@ get_switcher_rows() {
     declare -A window_name=()
     declare -A window_panes=()
     declare -A pane_cmd=()
+    # LOCAL PATCH (not upstream): tracks which sessions actually contain an
+    # agent, so agent-less and dead sessions can be dropped from the tree.
+    declare -A session_has_agent=()
+    declare -A pane_pid_map=()
     local session_order=()
-    local session="" pane_id="" win_idx="" win_name="" cmd="" pane_title=""
+    local session="" pane_id="" win_idx="" win_name="" cmd="" pane_title="" pane_pid=""
 
-    while IFS=$'\t' read -r session pane_id win_idx win_name cmd pane_title; do
+    # LOCAL PATCH: build the PID map once up front (see find_pane_agent_name_var).
+    _build_agent_pid_map
+
+    while IFS=$'\t' read -r session pane_id win_idx win_name cmd pane_title pane_pid; do
         [ -z "$session" ] && continue
 
         if [ -z "${session_seen[$session]:-}" ]; then
@@ -203,6 +217,14 @@ get_switcher_rows() {
         fi
 
         [ "$pane_title" = "agent-sidebar" ] && continue
+
+        # LOCAL PATCH: flag the session if this pane runs an agent.
+        if [ -z "${session_has_agent[$session]:-}" ]; then
+            if [ -f "$PANE_DIR/${session}_${pane_id}.agent" ] \
+               || find_pane_agent_name_var "$pane_pid"; then
+                session_has_agent[$session]=1
+            fi
+        fi
 
         local window_key="${session}:${win_idx}"
         if [ -z "${window_seen[$window_key]:-}" ]; then
@@ -213,10 +235,16 @@ get_switcher_rows() {
 
         window_panes[$window_key]+="${pane_id} "
         pane_cmd[$pane_id]="$cmd"
+        pane_pid_map[$pane_id]="$pane_pid"
     done < <(tmux list-panes -a -F \
-        "#{session_name}${tab}#{pane_id}${tab}#{window_index}${tab}#{window_name}${tab}#{pane_current_command}${tab}#{pane_title}" 2>/dev/null)
+        "#{session_name}${tab}#{pane_id}${tab}#{window_index}${tab}#{window_name}${tab}#{pane_current_command}${tab}#{pane_title}${tab}#{pane_pid}" 2>/dev/null)
 
     for session in "${session_order[@]}"; do
+        # LOCAL PATCH: hide sessions with no agent in them. Upstream listed
+        # every tmux session, so long-lived agent-less ones buried the few
+        # that matter.
+        [ -n "${session_has_agent[$session]:-}" ] || continue
+
         local win_list="${session_windows[$session]:-}"
         local session_panes=()
         local window_index=""
@@ -242,8 +270,11 @@ get_switcher_rows() {
                 session_marker="▸"
             fi
         fi
-        printf 'S\t%s\t%b  %s [session] %s\n' \
-            "$session" "$session_icon" "$session_marker" "$session"
+        # LOCAL PATCH (not upstream): render the status word next to the icon,
+        # matching the agents view. Upstream showed the glyph alone, which asks
+        # you to decode colour+shape to tell done from working from parked.
+        printf 'S\t%s\t%b  %-7s  %s [session] %s\n' \
+            "$session" "$session_icon" "$session_status" "$session_marker" "$session"
 
         session_expanded "$session" || continue
 
@@ -269,18 +300,33 @@ get_switcher_rows() {
                     window_marker="▸"
                 fi
             fi
-            printf 'P\t%s:w%s\t%b    %s [window] %s / %s\n' \
-                "$session" "$window_index" "$window_icon" "$window_marker" "$session" "${window_name[$window_key]}"
+            printf 'P\t%s:w%s\t%b  %-7s    %s [window] %s / %s\n' \
+                "$session" "$window_index" "$window_icon" "$window_status" \
+                "$window_marker" "$session" "${window_name[$window_key]}"
 
             window_expanded "$window_token" || continue
 
             for pane in "${panes[@]}"; do
                 local pane_status pane_icon badge
-                pane_status=$(get_pane_status "$session" "$pane")
-                pane_icon=$(status_icon "$pane_status")
                 badge=$(pane_agent_badge "$session" "$pane")
-                printf 'P\t%s:%s\t%b      • [pane] %s / %s : %s%b\n' \
-                    "$session" "$pane" "$pane_icon" "$session" "${window_name[$window_key]}" \
+
+                # LOCAL PATCH (not upstream): only agent panes get a status.
+                # get_pane_status() falls back to the session-wide status for
+                # panes with no status file of their own, so an editor or shell
+                # sitting beside an agent claimed to be "working" too. Show a
+                # dim dash instead - the pane stays listed and jumpable, it
+                # just no longer reports a state it doesn't have.
+                if [ -f "$PANE_DIR/${session}_${pane}.agent" ] \
+                   || find_pane_agent_name_var "${pane_pid_map[$pane]:-}"; then
+                    pane_status=$(get_pane_status "$session" "$pane")
+                    pane_icon=$(status_icon "$pane_status")
+                else
+                    pane_status="-"
+                    pane_icon=$'\033[2m·\033[0m'
+                fi
+                printf 'P\t%s:%s\t%b  %-7s      • [pane] %s / %s : %s%b\n' \
+                    "$session" "$pane" "$pane_icon" "$pane_status" \
+                    "$session" "${window_name[$window_key]}" \
                     "${pane_cmd[$pane]:-shell}" "$badge"
             done
         done
@@ -291,19 +337,80 @@ get_switcher_list() {
     get_switcher_rows | cut -f3-
 }
 
+# LOCAL PATCH (not upstream): best-effort agent name for a single pane, by
+# scanning that pane's own process subtree. Mirrors find_session_agent_name()
+# but scoped to a pane instead of a whole session.
+#
+# Deliberately sets a global instead of echoing, and walks the tree inline
+# rather than calling find_matching_descendant_pid. Both helpers memoize the
+# PID map into globals, so reaching them through $( ) puts the memo in a
+# throwaway subshell and re-runs a full `ps -e` for every pane tested. On a
+# 40-pane server that cost ~13s per listing and fzf came up empty while it ran.
+# Caller must have run _build_agent_pid_map in THIS shell first.
+_PANE_AGENT_NAME=""
+find_pane_agent_name_var() {
+    local pane_pid="$1"
+    _PANE_AGENT_NAME=""
+    [ -z "$pane_pid" ] && return 1
+
+    local queue=("$pane_pid") qi=0 cur cur_args children child
+    while (( qi < ${#queue[@]} )); do
+        cur="${queue[$qi]}"
+        ((qi++))
+        cur_args="${_AP_ARGS[$cur]:-}"
+        if [ -n "$cur_args" ] && [[ "$cur_args" =~ (^|[[:space:]/])(claude|codex|devin)([[:space:]]|$) ]]; then
+            case "$cur_args" in
+                *claude*) _PANE_AGENT_NAME="claude" ;;
+                *codex*)  _PANE_AGENT_NAME="codex" ;;
+                *devin*)  _PANE_AGENT_NAME="devin" ;;
+                *)        _PANE_AGENT_NAME="agent" ;;
+            esac
+            return 0
+        fi
+        children="${_AP_CHILDREN[$cur]:-}"
+        for child in $children; do
+            queue+=("$child")
+        done
+    done
+    return 1
+}
+
 # Flat list of every agent pane (any status), sorted by agents-mode
 # priority then by tmux list-panes order. Emits the same `P\t<session>:<pane_id>\t<display>`
 # row shape as get_switcher_rows so the existing fzf bindings continue to work.
 get_agents_rows() {
     local tab=$'\t'
 
-    {
-    local session pane_id win_idx win_name cmd pane_title
-    local order=0
+    # Build the PID→children map once for this whole listing, in the same
+    # shell as the loop below so every pane test reuses it. See the note on
+    # find_pane_agent_name_var above.
+    _build_agent_pid_map
 
-    while IFS=$'\t' read -r session pane_id win_idx win_name cmd pane_title; do
+    local session pane_id win_idx win_name cmd pane_title pane_pid
+    local order=0
+    # LOCAL PATCH (not upstream): collect first, emit second, so the session
+    # column can be padded to the widest name actually present instead of
+    # letting each row set its own ragged width.
+    local -a collected=()
+    local max_sess=0
+
+    while IFS=$'\t' read -r session pane_id win_idx win_name cmd pane_title pane_pid; do
         [ -z "$session" ] && continue
         [ "$pane_title" = "agent-sidebar" ] && continue
+
+        # LOCAL PATCH (not upstream): require the pane to actually run an agent.
+        # get_pane_status() falls back to the session-wide status for any pane
+        # with no .status file of its own, so upstream listed every plain shell
+        # and editor pane sharing a session with an agent as a phantom row
+        # wearing that agent's status. Trust the hook-written .agent marker
+        # first, then fall back to a per-pane process scan for agents that
+        # predate the hook install.
+        local agent=""
+        [ -f "$PANE_DIR/${session}_${pane_id}.agent" ] && agent=$(<"$PANE_DIR/${session}_${pane_id}.agent")
+        if [ -z "$agent" ] && find_pane_agent_name_var "$pane_pid"; then
+            agent="$_PANE_AGENT_NAME"
+        fi
+        [ -z "$agent" ] && continue
 
         local status
         status=$(get_pane_status "$session" "$pane_id")
@@ -312,23 +419,31 @@ get_agents_rows() {
             *) continue ;;
         esac
 
-        local pri icon agent badge=""
+        local pri
         pri=$(agents_mode_priority "$status")
-        icon=$(status_icon "$status")
 
-        agent=""
-        [ -f "$PANE_DIR/${session}_${pane_id}.agent" ] && agent=$(<"$PANE_DIR/${session}_${pane_id}.agent")
-        [ -n "$agent" ] && badge=" [$agent]"
-
-        # SORTKEY \t row …  SORTKEY = pri (desc) + order (asc)
-        printf '%d\t%010d\tP\t%s:%s\t%b  %-7s  %s:%s.%s%s  %s\n' \
-            "$pri" "$order" \
-            "$session" "$pane_id" \
-            "$icon" "$status" "$session" "$win_idx" "${pane_id#%}" "$badge" "$win_name"
+        collected+=("${pri}${tab}${order}${tab}${session}${tab}${pane_id}${tab}${status}${tab}${win_name}")
+        (( ${#session} > max_sess )) && max_sess=${#session}
 
         order=$((order + 1))
     done < <(tmux list-panes -a -F \
-        "#{session_name}${tab}#{pane_id}${tab}#{window_index}${tab}#{window_name}${tab}#{pane_current_command}${tab}#{pane_title}" 2>/dev/null)
+        "#{session_name}${tab}#{pane_id}${tab}#{window_index}${tab}#{window_name}${tab}#{pane_current_command}${tab}#{pane_title}${tab}#{pane_pid}" 2>/dev/null)
+
+    {
+    local rec
+    for rec in "${collected[@]}"; do
+        IFS="$tab" read -r pri order session pane_id status win_name <<< "$rec"
+        # LOCAL PATCH (not upstream): display is `icon  status  session  window`.
+        # Dropped the `[claude]` badge (every row carries it, so it separates
+        # nothing) and the `:win.pane` suffix (an fzf-invisible tmux coordinate -
+        # the real target still travels in field 2, which is what Enter uses).
+        # SORTKEY \t row …  SORTKEY = pri (desc) + order (asc)
+        printf '%d\t%010d\tP\t%s:%s\t%b  %-7s  %-*s  %s\n' \
+            "$pri" "$order" \
+            "$session" "$pane_id" \
+            "$(status_icon "$status")" "$status" \
+            "$max_sess" "$session" "$win_name"
+    done
     } | sort -k1,1nr -k2,2n | cut -f3-
 }
 
@@ -522,7 +637,8 @@ case "${SWITCHER_COMMAND:-}" in
                 printf "execute-silent(bash %q --state-dir %q --request-relaunch toggle-preview)+abort\n" \
                     "$0" "$SWITCHER_STATE_DIR"
             else
-                printf 'change-preview-window(right,65%%,border-left,wrap|right,65%%,border-left,wrap,hidden)\n'
+                printf 'change-preview-window(right,%s,border-left,wrap|right,%s,border-left,wrap,hidden)\n' \
+                    "$PREVIEW_WIDTH" "$PREVIEW_WIDTH"
             fi
         else
             printf "execute-silent(bash %q --state-dir %q --toggle-expand {2} {1})+reload(bash %q --state-dir %q --rows)\n" \
@@ -534,7 +650,7 @@ case "${SWITCHER_COMMAND:-}" in
         # Used only by the in-process ctrl-f flow (window display-method).
         # Wrapped popup uses --request-relaunch instead.
         if [ "$(current_mode)" = "agents" ]; then
-            printf 'change-preview-window(right,65%%,border-left,wrap)\n'
+            printf 'change-preview-window(right,%s,border-left,wrap)\n' "$PREVIEW_WIDTH"
         else
             printf 'change-preview-window(hidden)\n'
         fi
@@ -679,7 +795,7 @@ selected=$(emit_rows_for_mode | fzf \
     --no-sort \
     --listen="$socket" \
     --preview='id={2}; tmux capture-pane -e -p -t "${id##*:}" -S -120 2>/dev/null' \
-    --preview-window="right,65%,border-left,wrap${preview_hidden_flag}" \
+    --preview-window="right,${PREVIEW_WIDTH},border-left,wrap${preview_hidden_flag}" \
     --prompt="  " \
     --header=$'\033[90mctrl-f mode  tab expand/preview  ctrl-x close  ctrl-p park  ctrl-w wait  ctrl-r reset\033[0m' \
     --header-first \

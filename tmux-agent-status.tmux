@@ -123,8 +123,13 @@ tmux set-hook -ga after-new-window "run-shell -b '$CURRENT_DIR/scripts/sidebar-s
 tmux set-hook -ga after-kill-window "run-shell -b '$CURRENT_DIR/scripts/sidebar-signal.sh collect'"
 tmux set-hook -ga after-rename-window "run-shell -b '$CURRENT_DIR/scripts/sidebar-signal.sh collect'"
 
-# Auto-create sidebar in new sessions (small delay so the session is ready)
-tmux set-hook -ga session-created "run-shell -b 'sleep 0.5 && $CURRENT_DIR/scripts/sidebar-toggle.sh'"
+# LOCAL PATCH (not upstream): gate sidebar auto-creation on @agent-switcher-style.
+# Upstream only consults the style option when binding keys, so "popup" mode still
+# split a sidebar pane into every existing and new session. Skip that in popup mode.
+if [ "$switcher_style" != "popup" ]; then
+    # Auto-create sidebar in new sessions (small delay so the session is ready)
+    tmux set-hook -ga session-created "run-shell -b 'sleep 0.5 && $CURRENT_DIR/scripts/sidebar-toggle.sh'"
+fi
 
 # Start sidebar data collector daemon (one per tmux server)
 "$CURRENT_DIR/scripts/sidebar-collector.sh" &
@@ -133,11 +138,13 @@ tmux set-hook -ga session-created "run-shell -b 'sleep 0.5 && $CURRENT_DIR/scrip
 if tmux list-sessions >/dev/null 2>&1; then
     "$CURRENT_DIR/scripts/daemon-monitor.sh" >/dev/null 2>&1
 
-    # Create sidebar in all existing sessions that don't have one
-    for sess in $(tmux list-sessions -F '#{session_name}' 2>/dev/null); do
-        has_sidebar=$(tmux list-panes -t "$sess" -F '#{pane_title}' 2>/dev/null | grep -c "agent-sidebar")
-        if [ "$has_sidebar" -eq 0 ]; then
-            tmux run-shell -t "$sess" -b "$CURRENT_DIR/scripts/sidebar-toggle.sh" 2>/dev/null
-        fi
-    done
+    if [ "$switcher_style" != "popup" ]; then
+        # Create sidebar in all existing sessions that don't have one
+        for sess in $(tmux list-sessions -F '#{session_name}' 2>/dev/null); do
+            has_sidebar=$(tmux list-panes -t "$sess" -F '#{pane_title}' 2>/dev/null | grep -c "agent-sidebar")
+            if [ "$has_sidebar" -eq 0 ]; then
+                tmux run-shell -t "$sess" -b "$CURRENT_DIR/scripts/sidebar-toggle.sh" 2>/dev/null
+            fi
+        done
+    fi
 fi
