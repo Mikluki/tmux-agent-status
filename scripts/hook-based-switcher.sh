@@ -660,10 +660,33 @@ case "${SWITCHER_COMMAND:-}" in
         # Signal the popup-loop wrapper to relaunch with new dimensions.
         case "$SWITCHER_ARG1" in
             toggle-mode)
+                # LOCAL PATCH (not upstream): upstream re-derived preview
+                # visibility from the new mode - agents on, tree off. That held
+                # while agents mode always meant preview-on, but once
+                # @agent-switcher-preview-default let agents open compact, the
+                # mode toggle stopped being an involution:
+                #   agents+hidden -C-f-> tree -C-f-> agents+VISIBLE
+                # so the view you started in was unreachable and the preview
+                # picker cost two presses. Carry the agents-mode preference
+                # across instead.
+                #
+                # Tree still forces the preview off unconditionally: `tab` is
+                # expand/collapse there, so a preview switched on in tree mode
+                # would have no key to switch it back off.
+                prev_pref="$SWITCHER_STATE_DIR/preview-hidden-agents"
+                cur=1
+                [ -f "$SWITCHER_STATE_DIR/preview-hidden" ] && cur=$(<"$SWITCHER_STATE_DIR/preview-hidden")
+                [ "$(current_mode)" = "agents" ] && printf '%s' "$cur" > "$prev_pref"
+
                 toggle_mode
-                # When swapping to agents, default preview back on; tree → off.
+
                 if [ "$(current_mode)" = "agents" ]; then
-                    printf '0' > "$SWITCHER_STATE_DIR/preview-hidden"
+                    restored=""
+                    [ -f "$prev_pref" ] && restored=$(<"$prev_pref")
+                    # No remembered preference (tree-first launch): fall back to
+                    # upstream's "agents shows the preview".
+                    [ -n "$restored" ] || restored=0
+                    printf '%s' "$restored" > "$SWITCHER_STATE_DIR/preview-hidden"
                 else
                     printf '1' > "$SWITCHER_STATE_DIR/preview-hidden"
                 fi
@@ -675,6 +698,12 @@ case "${SWITCHER_COMMAND:-}" in
                     printf '0' > "$SWITCHER_STATE_DIR/preview-hidden"
                 else
                     printf '1' > "$SWITCHER_STATE_DIR/preview-hidden"
+                fi
+                # `tab` only toggles the preview in agents mode, so this IS the
+                # agents preference that a mode round-trip has to restore.
+                if [ "$(current_mode)" = "agents" ]; then
+                    cp -f "$SWITCHER_STATE_DIR/preview-hidden" \
+                          "$SWITCHER_STATE_DIR/preview-hidden-agents" 2>/dev/null || :
                 fi
                 ;;
             *)

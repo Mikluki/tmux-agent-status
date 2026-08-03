@@ -23,17 +23,25 @@ printf '%s' "$initial_mode" > "$state_dir/mode"
 # tmux.conf pin the initial state so the agents list can open in the compact
 # centred popup. `tab` still toggles the preview on demand either way.
 preview_default=$(tmux show-option -gqv "@agent-switcher-preview-default" 2>/dev/null)
+
+# The agents-mode preview preference outlives mode toggles (ctrl-f), so that
+# ctrl-f is a plain two-state toggle and does not resurrect the preview - and
+# with it the large popup - on the way back. `tab` updates this too.
 case "$preview_default" in
-    hidden)  printf '1' > "$state_dir/preview-hidden" ;;
-    visible) printf '0' > "$state_dir/preview-hidden" ;;
-    *)
-        if [ "$initial_mode" = "agents" ]; then
-            printf '0' > "$state_dir/preview-hidden"
-        else
-            printf '1' > "$state_dir/preview-hidden"
-        fi
-        ;;
+    hidden)  agents_pref=1 ;;
+    visible) agents_pref=0 ;;
+    *)       agents_pref=0 ;;   # upstream: agents mode shows the preview
 esac
+printf '%s' "$agents_pref" > "$state_dir/preview-hidden-agents"
+
+if [ "$initial_mode" = "agents" ]; then
+    printf '%s' "$agents_pref" > "$state_dir/preview-hidden"
+else
+    case "$preview_default" in
+        visible) printf '0' > "$state_dir/preview-hidden" ;;
+        *)       printf '1' > "$state_dir/preview-hidden" ;;
+    esac
+fi
 
 while true; do
     rm -f "$state_dir/relaunch" "$state_dir/rows.seed"
