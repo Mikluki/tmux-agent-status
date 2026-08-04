@@ -42,9 +42,9 @@ case "\${1:-}" in
     list-panes)
         if [ "\${2:-}" = "-a" ] && [ "\${3:-}" = "-F" ]; then
             case "\${4:-}" in
-                "#{session_name}${tab}#{pane_id}${tab}#{pane_current_path}${tab}#{pane_pid}${tab}#{window_index}${tab}#{window_name}")
-                    printf 'repo${tab}%%1${tab}/home/test/repo${tab}101${tab}0${tab}main\n'
-                    printf 'zeta${tab}%%9${tab}/home/test/zeta${tab}109${tab}0${tab}next\n'
+                "#{session_name}${tab}#{pane_id}${tab}#{pane_current_path}${tab}#{pane_pid}${tab}#{window_index}${tab}#{window_name}${tab}#{pane_current_command}")
+                    printf 'repo${tab}%%1${tab}/home/test/repo${tab}101${tab}0${tab}main${tab}claude\n'
+                    printf 'zeta${tab}%%9${tab}/home/test/zeta${tab}109${tab}0${tab}next${tab}claude\n'
                     exit 0
                     ;;
                 "#{session_name}${tab}#{pane_id}")

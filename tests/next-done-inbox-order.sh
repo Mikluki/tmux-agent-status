@@ -44,12 +44,12 @@ case "${1:-}" in
     list-panes)
         if [ "${2:-}" = "-a" ] && [ "${3:-}" = "-F" ]; then
             case "${4:-}" in
-                "#{session_name}"$'\t'"#{pane_id}"$'\t'"#{pane_current_path}"$'\t'"#{pane_pid}"$'\t'"#{window_index}"$'\t'"#{window_name}")
+                "#{session_name}"$'\t'"#{pane_id}"$'\t'"#{pane_current_path}"$'\t'"#{pane_pid}"$'\t'"#{window_index}"$'\t'"#{window_name}"$'\t'"#{pane_current_command}")
                     cat <<'OUT'
-repo	%1	/home/test/repo	101	0	alpha
-repo	%2	/home/test/repo	102	1	beta
-repo	%3	/home/test/repo	103	2	gamma
-zeta	%9	/home/test/zeta	109	0	delta
+repo	%1	/home/test/repo	101	0	alpha	claude
+repo	%2	/home/test/repo	102	1	beta	claude
+repo	%3	/home/test/repo	103	2	gamma	claude
+zeta	%9	/home/test/zeta	109	0	delta	claude
 OUT
                     exit 0
                     ;;
