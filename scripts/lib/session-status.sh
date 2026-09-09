@@ -1,10 +1,9 @@
 #!/usr/bin/env bash
 
 # Shared session-status helpers used by the sidebar, switcher, and other scripts.
-# Provides: is_ssh_session, has_agent_in_session, session_is_fully_parked,
-#           normalize_local_wait_status, status_priority, get_pane_status,
-#           get_window_status, get_agent_status, sync_session_after_child_scope_change,
-#           plus STATUS_DIR / PARKED_DIR / WAIT_DIR constants.
+# Provides: is_ssh_session, has_agent_in_session, normalize_local_wait_status,
+#           status_priority, get_pane_status, get_window_status, get_agent_status,
+#           sync_session_after_child_scope_change, plus STATUS_DIR / WAIT_DIR constants.
 
 _LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=require-bash4.sh
@@ -15,14 +14,13 @@ require_bash4 "$@"
 _SESSION_STATUS_LOADED=1
 
 STATUS_DIR="$HOME/.cache/tmux-agent-status"
-PARKED_DIR="$STATUS_DIR/parked"
 WAIT_DIR="$STATUS_DIR/wait"
 PANE_DIR="$STATUS_DIR/panes"
 SIDEBAR_CLIENT_DIR="$STATUS_DIR/sidebar-clients"
 STATUS_LINE_CACHE_FILE="$STATUS_DIR/.status-line"
 STATUS_LINE_COUNTS_FILE="$STATUS_DIR/.status-line-counts"
 REFRESH_FILE="$STATUS_DIR/.sidebar-refresh"
-mkdir -p "$STATUS_DIR" "$PARKED_DIR" "$WAIT_DIR" "$PANE_DIR" "$SIDEBAR_CLIENT_DIR"
+mkdir -p "$STATUS_DIR" "$WAIT_DIR" "$PANE_DIR" "$SIDEBAR_CLIENT_DIR"
 [ -f "$REFRESH_FILE" ] || : > "$REFRESH_FILE"
 
 # Source process-detection helpers from the same lib directory.
@@ -42,43 +40,6 @@ is_ssh_session() {
 
 has_agent_in_session() {
     session_has_agent_process "$1"
-}
-
-session_is_fully_parked() {
-    local session="$1"
-    local live_pane=1
-    local pane_session=""
-    local pane_id=""
-
-    while IFS=$'\t' read -r pane_session pane_id; do
-        [ "$pane_session" = "$session" ] || continue
-        [ -n "$pane_id" ] || continue
-        live_pane=0
-        [ -f "$PARKED_DIR/${session}_${pane_id}.parked" ] || return 1
-    done < <(tmux list-panes -a -F '#{session_name}'$'\t''#{pane_id}' 2>/dev/null)
-
-    if [ "$live_pane" -eq 0 ]; then
-        return 0
-    fi
-
-    local seen_pane=1
-    local pane_file=""
-
-    for pane_file in "$PANE_DIR/${session}_"*.status; do
-        [ -f "$pane_file" ] || continue
-        seen_pane=0
-
-        local pane_id
-        pane_id=$(basename "$pane_file" .status)
-        pane_id="${pane_id#${session}_}"
-        [ -f "$PARKED_DIR/${session}_${pane_id}.parked" ] || return 1
-    done
-
-    if [ "$seen_pane" -eq 0 ]; then
-        return 0
-    fi
-
-    [ -f "$PARKED_DIR/${session}.parked" ]
 }
 
 normalize_local_wait_status() {
@@ -101,7 +62,6 @@ status_priority() {
         wait) echo 4 ;;
         ask) echo 3 ;;
         done) echo 2 ;;
-        parked) echo 1 ;;
         *) echo 0 ;;
     esac
 }
@@ -125,11 +85,6 @@ recompute_session_status() {
     local best_priority
     best_priority=$(status_priority "$best_status")
 
-    if session_is_fully_parked "$session"; then
-        write_session_status "$session" "parked"
-        return
-    fi
-
     if [ -f "$WAIT_DIR/${session}.wait" ]; then
         write_session_status "$session" "wait"
         return
@@ -143,9 +98,7 @@ recompute_session_status() {
         pane_name=$(basename "$pane_file" .status)
         pane_id="${pane_name##*_}"
 
-        if [ -f "$PARKED_DIR/${session}_${pane_id}.parked" ]; then
-            pane_status="parked"
-        elif [ -f "$WAIT_DIR/${session}_${pane_id}.wait" ]; then
+        if [ -f "$WAIT_DIR/${session}_${pane_id}.wait" ]; then
             pane_status="wait"
         else
             pane_status=$(cat "$pane_file" 2>/dev/null || echo "")
@@ -169,13 +122,7 @@ sync_session_after_child_scope_change() {
     local session="$1"
 
     # Lower-scope actions should not leave stale session-wide overrides behind.
-    rm -f "$PARKED_DIR/${session}.parked"
     rm -f "$WAIT_DIR/${session}.wait"
-
-    if session_is_fully_parked "$session"; then
-        write_session_status "$session" "parked"
-        return
-    fi
 
     recompute_session_status "$session"
 }
@@ -238,12 +185,6 @@ get_pane_status() {
     local pane_id="$2"
     local pane_status="$PANE_DIR/${session}_${pane_id}.status"
     local pane_wait="$WAIT_DIR/${session}_${pane_id}.wait"
-    local pane_parked="$PARKED_DIR/${session}_${pane_id}.parked"
-
-    if [ -f "$pane_parked" ]; then
-        echo "parked"
-        return
-    fi
 
     if [ -f "$pane_wait" ]; then
         local now expiry
@@ -296,11 +237,6 @@ get_window_status() {
 get_agent_status() {
     local session="$1"
 
-    if session_is_fully_parked "$session"; then
-        echo "parked"
-        return
-    fi
-
     # Check for remote status file first (for SSH sessions)
     local remote_status="$STATUS_DIR/${session}-remote.status"
     if [ -f "$remote_status" ] && is_ssh_session "$session"; then
@@ -316,10 +252,6 @@ get_agent_status() {
         normalize_local_wait_status "$session"
         local status
         status=$(cat "$status_file" 2>/dev/null || echo "")
-        if [ "$status" = "parked" ] && ! session_is_fully_parked "$session"; then
-            recompute_session_status "$session"
-            status=$(cat "$status_file" 2>/dev/null || echo "")
-        fi
         if [ "$status" = "wait" ] && [ ! -f "$WAIT_DIR/${session}.wait" ]; then
             recompute_session_status "$session"
             status=$(cat "$status_file" 2>/dev/null || echo "")

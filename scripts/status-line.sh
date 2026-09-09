@@ -82,15 +82,8 @@ check_agent_processes() {
         [ -z "$session" ] && continue
         local status_file="$STATUS_DIR/${session}.status"
         local wait_file="$STATUS_DIR/wait/${session}.wait"
-        local parked_file="$PARKED_DIR/${session}.parked"
         local current_status=""
         local codex_pid=""
-
-        # Parking is an explicit user decision — never auto-unpark.
-        # Unparking only happens via user interaction (hook in better-hook.sh).
-        if session_is_fully_parked "$session"; then
-            continue
-        fi
 
         current_status=$(cat "$status_file" 2>/dev/null)
         if session_has_pane_status "$session"; then
@@ -131,10 +124,6 @@ count_agent_status() {
     # Check all tmux sessions including SSH remote status
     while IFS= read -r session; do
         [ -z "$session" ] && continue
-
-        if session_is_fully_parked "$session"; then
-            continue
-        fi
 
         # Check for SSH remote status file (e.g., reachgpu-remote.status)
         local remote_status_file="$STATUS_DIR/${session}-remote.status"
@@ -191,7 +180,6 @@ collect_status_agents() {
     local session
     while IFS= read -r session; do
         [ -z "$session" ] && continue
-        session_is_fully_parked "$session" && continue
 
         local detected_name=""
         local emitted=0
@@ -216,7 +204,7 @@ collect_status_agents() {
 
             local astatus
             astatus=$(get_pane_status "$session" "$pane_id")
-            (( session_wait )) && [ "$astatus" != "parked" ] && astatus="wait"
+            (( session_wait )) && astatus="wait"
             case "$astatus" in
                 working|wait|done|ask) ;;
                 *) continue ;;

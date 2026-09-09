@@ -4,7 +4,6 @@
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 STATUS_DIR="$HOME/.cache/tmux-agent-status"
-PARKED_DIR="$STATUS_DIR/parked"
 DAEMON_PID_FILE="$STATUS_DIR/smart-monitor.pid"
 # shellcheck source=scripts/lib/session-status.sh
 source "$SCRIPT_DIR/scripts/lib/session-status.sh"
@@ -52,7 +51,6 @@ update_ssh_status() {
     if tmux has-session -t reachgpu 2>/dev/null; then
         local temp_file="$STATUS_DIR/.reachgpu-remote.status.tmp"
         local wait_file="$STATUS_DIR/wait/reachgpu.wait"
-        local parked_file="$PARKED_DIR/reachgpu.parked"
         if ssh -o ConnectTimeout=2 -o BatchMode=yes -o StrictHostKeyChecking=no -o LogLevel=QUIET \
             reachgpu "cat ~/.cache/tmux-agent-status/reachgpu.status 2>/dev/null || echo ''" \
             > "$temp_file" 2>/dev/null; then
@@ -61,8 +59,8 @@ update_ssh_status() {
             if [ "$remote_status" = "working" ] && [ -f "$wait_file" ]; then
                 rm -f "$wait_file"
             fi
-            # Don't overwrite local wait or parked overrides.
-            if [ ! -f "$wait_file" ] && [ ! -f "$parked_file" ]; then
+            # Don't overwrite a local wait override.
+            if [ ! -f "$wait_file" ]; then
                 mv "$temp_file" "$STATUS_DIR/reachgpu-remote.status"
             else
                 rm -f "$temp_file"
@@ -76,7 +74,6 @@ update_ssh_status() {
     if tmux has-session -t tig 2>/dev/null; then
         local temp_file="$STATUS_DIR/.tig-remote.status.tmp"
         local wait_file="$STATUS_DIR/wait/tig.wait"
-        local parked_file="$PARKED_DIR/tig.parked"
         if ssh -o ConnectTimeout=2 -o BatchMode=yes -o StrictHostKeyChecking=no -o LogLevel=QUIET \
             nga100 "cat ~/.cache/tmux-agent-status/tig.status 2>/dev/null || echo ''" \
             > "$temp_file" 2>/dev/null; then
@@ -85,8 +82,8 @@ update_ssh_status() {
             if [ "$remote_status" = "working" ] && [ -f "$wait_file" ]; then
                 rm -f "$wait_file"
             fi
-            # Don't overwrite local wait or parked overrides.
-            if [ ! -f "$wait_file" ] && [ ! -f "$parked_file" ]; then
+            # Don't overwrite a local wait override.
+            if [ ! -f "$wait_file" ]; then
                 mv "$temp_file" "$STATUS_DIR/tig-remote.status"
             else
                 rm -f "$temp_file"
@@ -100,7 +97,6 @@ update_ssh_status() {
     if tmux has-session -t l4-workstation 2>/dev/null; then
         local temp_file="$STATUS_DIR/.l4-workstation-remote.status.tmp"
         local wait_file="$STATUS_DIR/wait/l4-workstation.wait"
-        local parked_file="$PARKED_DIR/l4-workstation.parked"
         if ssh -o ConnectTimeout=2 -o BatchMode=yes -o StrictHostKeyChecking=no -o LogLevel=QUIET \
             l4-workstation "cat ~/.cache/tmux-agent-status/l4-workstation.status 2>/dev/null || echo ''" \
             > "$temp_file" 2>/dev/null; then
@@ -109,8 +105,8 @@ update_ssh_status() {
             if [ "$remote_status" = "working" ] && [ -f "$wait_file" ]; then
                 rm -f "$wait_file"
             fi
-            # Don't overwrite local wait or parked overrides.
-            if [ ! -f "$wait_file" ] && [ ! -f "$parked_file" ]; then
+            # Don't overwrite a local wait override.
+            if [ ! -f "$wait_file" ]; then
                 mv "$temp_file" "$STATUS_DIR/l4-workstation-remote.status"
             else
                 rm -f "$temp_file"

@@ -10,7 +10,7 @@ STATUS_DIR="$HOME/.cache/tmux-agent-status"
 DEMO_DIR=$(mktemp -d)
 echo "$DEMO_DIR" > /tmp/demo-agent-status-dir
 
-mkdir -p "$STATUS_DIR/parked" "$STATUS_DIR/wait" "$STATUS_DIR/panes"
+mkdir -p "$STATUS_DIR/wait" "$STATUS_DIR/panes"
 
 # ── Fake claude binary (so pgrep detects multi-agent panes) ──
 mkdir -p "$DEMO_DIR/bin"

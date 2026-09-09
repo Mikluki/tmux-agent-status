@@ -10,11 +10,10 @@ TEST_HOME="$TMP_DIR/home"
 FAKE_BIN="$TMP_DIR/bin"
 STATUS_DIR="$TEST_HOME/.cache/tmux-agent-status"
 WAIT_DIR="$STATUS_DIR/wait"
-PARKED_DIR="$STATUS_DIR/parked"
 PANE_DIR="$STATUS_DIR/panes"
 REFRESH_FILE="$STATUS_DIR/.sidebar-refresh"
 
-mkdir -p "$FAKE_BIN" "$STATUS_DIR" "$WAIT_DIR" "$PARKED_DIR" "$PANE_DIR"
+mkdir -p "$FAKE_BIN" "$STATUS_DIR" "$WAIT_DIR" "$PANE_DIR"
 
 cat > "$FAKE_BIN/tmux" <<'EOF'
 #!/usr/bin/env bash
@@ -71,9 +70,6 @@ echo "wait" > "$PANE_DIR/codex-hooks_%9.status"
 echo "1" > "$WAIT_DIR/codex-hooks.wait"
 echo "1" > "$WAIT_DIR/codex-hooks_%9.wait"
 echo "1" > "$WAIT_DIR/codex-hooks_%10.wait"
-: > "$PARKED_DIR/codex-hooks.parked"
-: > "$PARKED_DIR/codex-hooks_%9.parked"
-: > "$PARKED_DIR/codex-hooks_%10.parked"
 run_hook "UserPromptSubmit"
 session_status="$(cat "$STATUS_DIR/codex-hooks.status")"
 pane_status="$(cat "$PANE_DIR/codex-hooks_%9.status")"
@@ -84,49 +80,30 @@ if [ -f "$WAIT_DIR/codex-hooks.wait" ]; then
     echo "Assertion failed: UserPromptSubmit should clear wait mode" >&2
     exit 1
 fi
-if [ -f "$PARKED_DIR/codex-hooks.parked" ]; then
-    echo "Assertion failed: UserPromptSubmit should unpark the session" >&2
-    exit 1
-fi
 if [ -f "$WAIT_DIR/codex-hooks_%9.wait" ] || [ -f "$WAIT_DIR/codex-hooks_%10.wait" ]; then
     echo "Assertion failed: UserPromptSubmit should clear per-pane wait overrides when the whole session was waiting" >&2
     exit 1
 fi
-if [ -f "$PARKED_DIR/codex-hooks_%9.parked" ] || [ -f "$PARKED_DIR/codex-hooks_%10.parked" ]; then
-    echo "Assertion failed: UserPromptSubmit should clear per-pane parked overrides when the whole session was parked" >&2
-    exit 1
-fi
 
-echo "parked" > "$PANE_DIR/codex-hooks_%9.status"
+echo "done" > "$PANE_DIR/codex-hooks_%9.status"
 echo "1" > "$WAIT_DIR/codex-hooks_%9.wait"
-: > "$PARKED_DIR/codex-hooks_%9.parked"
 run_hook "UserPromptSubmit"
 if [ -f "$WAIT_DIR/codex-hooks_%9.wait" ]; then
     echo "Assertion failed: UserPromptSubmit should clear the current pane wait override" >&2
     exit 1
 fi
-if [ -f "$PARKED_DIR/codex-hooks_%9.parked" ]; then
-    echo "Assertion failed: UserPromptSubmit should clear the current pane parked override" >&2
-    exit 1
-fi
 
-echo "parked" > "$STATUS_DIR/codex-hooks.status"
+echo "done" > "$STATUS_DIR/codex-hooks.status"
 rm -f "$PANE_DIR/codex-hooks_%9.status"
 echo "1" > "$WAIT_DIR/codex-hooks.wait"
-: > "$PARKED_DIR/codex-hooks.parked"
 run_hook "PreToolUse"
 session_status="$(cat "$STATUS_DIR/codex-hooks.status")"
-assert_eq "parked" "$session_status" "PreToolUse should not unpark explicitly parked sessions"
+assert_eq "working" "$session_status" "PreToolUse should mark the session working"
 if [ -f "$WAIT_DIR/codex-hooks.wait" ]; then
     echo "Assertion failed: PreToolUse should still clear wait mode" >&2
     exit 1
 fi
-if [ ! -f "$PARKED_DIR/codex-hooks.parked" ]; then
-    echo "Assertion failed: PreToolUse should preserve the parked marker" >&2
-    exit 1
-fi
 
-rm -f "$PARKED_DIR/codex-hooks.parked"
 run_hook "Stop"
 session_status="$(cat "$STATUS_DIR/codex-hooks.status")"
 pane_status="$(cat "$PANE_DIR/codex-hooks_%9.status")"

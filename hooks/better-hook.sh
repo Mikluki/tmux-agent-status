@@ -5,10 +5,9 @@
 
 STATUS_DIR="$HOME/.cache/tmux-agent-status"
 WAIT_DIR="$STATUS_DIR/wait"
-PARKED_DIR="$STATUS_DIR/parked"
 PANE_DIR="$STATUS_DIR/panes"
 REFRESH_FILE="$STATUS_DIR/.sidebar-refresh"
-mkdir -p "$STATUS_DIR" "$WAIT_DIR" "$PARKED_DIR" "$PANE_DIR"
+mkdir -p "$STATUS_DIR" "$WAIT_DIR" "$PANE_DIR"
 [ -f "$REFRESH_FILE" ] || : > "$REFRESH_FILE"
 
 # Read JSON from stdin (required by Claude Code hooks). The Stop payload
@@ -89,18 +88,11 @@ set_status() {
 clear_interaction_overrides() {
     local tmux_session="$1"
     local session_wait_file="$WAIT_DIR/${tmux_session}.wait"
-    local session_parked_file="$PARKED_DIR/${tmux_session}.parked"
 
     if [ -f "$session_wait_file" ]; then
         rm -f "$session_wait_file" "$WAIT_DIR/${tmux_session}_"*.wait 2>/dev/null
     elif [ -n "${TMUX_PANE:-}" ]; then
         rm -f "$WAIT_DIR/${tmux_session}_${TMUX_PANE}.wait"
-    fi
-
-    if [ -f "$session_parked_file" ]; then
-        rm -f "$session_parked_file" "$PARKED_DIR/${tmux_session}_"*.parked 2>/dev/null
-    elif [ -n "${TMUX_PANE:-}" ]; then
-        rm -f "$PARKED_DIR/${tmux_session}_${TMUX_PANE}.parked"
     fi
 }
 
@@ -142,24 +134,19 @@ has_running_background_task() {
 TMUX_SESSION=$(get_tmux_session) || exit 0
 HOOK_TYPE="${1:-}"
 WAIT_FILE="$WAIT_DIR/${TMUX_SESSION}.wait"
-PARKED_FILE="$PARKED_DIR/${TMUX_SESSION}.parked"
 
 case "$HOOK_TYPE" in
     UserPromptSubmit)
         # User submitted a prompt — this is an explicit interaction, so
-        # cancel wait mode and unpark.
+        # cancel wait mode.
         clear_interaction_overrides "$TMUX_SESSION"
         set_status "$TMUX_SESSION" "working"
         mark_refresh
         ;;
     PreToolUse)
-        # Agent is calling a tool — mark working but do NOT unpark.
-        # Parking is an explicit user decision; only user interaction
-        # (UserPromptSubmit) should unpark.
+        # Agent is calling a tool — mark working.
         rm -f "$WAIT_FILE"
-        if [ ! -f "$PARKED_FILE" ]; then
-            set_status "$TMUX_SESSION" "working"
-        fi
+        set_status "$TMUX_SESSION" "working"
         mark_refresh
         ;;
     Stop)

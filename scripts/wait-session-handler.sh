@@ -5,7 +5,6 @@
 
 STATUS_DIR="$HOME/.cache/tmux-agent-status"
 WAIT_DIR="$STATUS_DIR/wait"
-PARKED_DIR="$STATUS_DIR/parked"
 PANE_DIR="$STATUS_DIR/panes"
 mkdir -p "$WAIT_DIR" "$PANE_DIR"
 
@@ -34,7 +33,6 @@ if [[ "$target" == *:w* ]]; then
         [ -z "$pid" ] && continue
         echo "$expiry_time" > "$WAIT_DIR/${session}_${pid}.wait"
         echo "wait" > "$PANE_DIR/${session}_${pid}.status"
-        rm -f "$PARKED_DIR/${session}_${pid}.parked" 2>/dev/null
     done < <(tmux list-panes -t "${session}:${win_idx}" -F '#{pane_id}' 2>/dev/null)
     sync
 
@@ -47,7 +45,6 @@ elif [[ "$target" == *:* ]]; then
 
     echo "$expiry_time" > "$WAIT_DIR/${session}_${pane_id}.wait"
     sync
-    rm -f "$PARKED_DIR/${session}_${pane_id}.parked"
     echo "wait" > "$PANE_DIR/${session}_${pane_id}.status"
 
     sync_session_after_child_scope_change "$session"
@@ -60,10 +57,6 @@ else
     echo "$expiry_time" > "$WAIT_DIR/$session.wait"
     sync
 
-    # Wait overrides parked state
-    rm -f "$PARKED_DIR/$session.parked"
-    rm -f "$PARKED_DIR/${session}_"*.parked 2>/dev/null
-
     if [ -f "$STATUS_DIR/${session}-remote.status" ]; then
         echo "wait" > "$STATUS_DIR/${session}-remote.status"
     else
@@ -75,7 +68,6 @@ else
         [ -z "$pid" ] && continue
         echo "$expiry_time" > "$WAIT_DIR/${session}_${pid}.wait"
         echo "wait" > "$PANE_DIR/${session}_${pid}.status"
-        rm -f "$PARKED_DIR/${session}_${pid}.parked" 2>/dev/null
     done < <(tmux list-panes -t "$session" -F '#{pane_id}' 2>/dev/null)
 
     tmux display-message "Session $session will wait for $wait_minutes minutes"

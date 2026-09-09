@@ -8,10 +8,9 @@
 
 STATUS_DIR="$HOME/.cache/tmux-agent-status"
 WAIT_DIR="$STATUS_DIR/wait"
-PARKED_DIR="$STATUS_DIR/parked"
 PANE_DIR="$STATUS_DIR/panes"
 REFRESH_FILE="$STATUS_DIR/.sidebar-refresh"
-mkdir -p "$STATUS_DIR" "$WAIT_DIR" "$PARKED_DIR" "$PANE_DIR"
+mkdir -p "$STATUS_DIR" "$WAIT_DIR" "$PANE_DIR"
 [ -f "$REFRESH_FILE" ] || : > "$REFRESH_FILE"
 
 # Drain the JSON payload from stdin so Devin can close the hook cleanly.
@@ -91,18 +90,11 @@ set_status() {
 clear_interaction_overrides() {
     local tmux_session="$1"
     local session_wait_file="$WAIT_DIR/${tmux_session}.wait"
-    local session_parked_file="$PARKED_DIR/${tmux_session}.parked"
 
     if [ -f "$session_wait_file" ]; then
         rm -f "$session_wait_file" "$WAIT_DIR/${tmux_session}_"*.wait 2>/dev/null
     elif [ -n "${TMUX_PANE:-}" ]; then
         rm -f "$WAIT_DIR/${tmux_session}_${TMUX_PANE}.wait"
-    fi
-
-    if [ -f "$session_parked_file" ]; then
-        rm -f "$session_parked_file" "$PARKED_DIR/${tmux_session}_"*.parked 2>/dev/null
-    elif [ -n "${TMUX_PANE:-}" ]; then
-        rm -f "$PARKED_DIR/${tmux_session}_${TMUX_PANE}.parked"
     fi
 }
 
@@ -113,11 +105,10 @@ mark_refresh() {
 TMUX_SESSION=$(get_tmux_session) || exit 0
 HOOK_TYPE="${1:-}"
 WAIT_FILE="$WAIT_DIR/${TMUX_SESSION}.wait"
-PARKED_FILE="$PARKED_DIR/${TMUX_SESSION}.parked"
 
 case "$HOOK_TYPE" in
     SessionStart)
-        if [ ! -f "$WAIT_FILE" ] && [ ! -f "$PARKED_FILE" ]; then
+        if [ ! -f "$WAIT_FILE" ]; then
             set_status "$TMUX_SESSION" "done"
             mark_refresh
         fi
@@ -129,9 +120,7 @@ case "$HOOK_TYPE" in
         ;;
     PreToolUse|PostToolUse)
         rm -f "$WAIT_FILE"
-        if [ ! -f "$PARKED_FILE" ]; then
-            set_status "$TMUX_SESSION" "working"
-        fi
+        set_status "$TMUX_SESSION" "working"
         mark_refresh
         ;;
     Stop)

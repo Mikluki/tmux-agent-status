@@ -10,11 +10,10 @@ TEST_HOME="$TMP_DIR/home"
 FAKE_BIN="$TMP_DIR/bin"
 STATUS_DIR="$TEST_HOME/.cache/tmux-agent-status"
 WAIT_DIR="$STATUS_DIR/wait"
-PARKED_DIR="$STATUS_DIR/parked"
 PANE_DIR="$STATUS_DIR/panes"
 REFRESH_FILE="$STATUS_DIR/.sidebar-refresh"
 
-mkdir -p "$FAKE_BIN" "$STATUS_DIR" "$WAIT_DIR" "$PARKED_DIR" "$PANE_DIR"
+mkdir -p "$FAKE_BIN" "$STATUS_DIR" "$WAIT_DIR" "$PANE_DIR"
 
 cat > "$FAKE_BIN/tmux" <<'EOF'
 #!/usr/bin/env bash
@@ -58,9 +57,8 @@ run_hook() {
         "$REPO_DIR/hooks/better-hook.sh" "$hook_name"
 }
 
-echo "parked" > "$PANE_DIR/mixed-hooks_%3.status"
+echo "done" > "$PANE_DIR/mixed-hooks_%3.status"
 echo "1" > "$WAIT_DIR/mixed-hooks_%3.wait"
-: > "$PARKED_DIR/mixed-hooks_%3.parked"
 run_hook "UserPromptSubmit" "%3"
 session_status="$(cat "$STATUS_DIR/mixed-hooks.status")"
 claude_status="$(cat "$PANE_DIR/mixed-hooks_%3.status")"
@@ -69,10 +67,6 @@ assert_eq "working" "$claude_status" "Claude UserPromptSubmit should mark the cu
 [ -f "$REFRESH_FILE" ] || { echo "Assertion failed: Claude UserPromptSubmit should touch sidebar refresh marker" >&2; exit 1; }
 if [ -f "$WAIT_DIR/mixed-hooks_%3.wait" ]; then
     echo "Assertion failed: Claude UserPromptSubmit should clear the current pane wait override" >&2
-    exit 1
-fi
-if [ -f "$PARKED_DIR/mixed-hooks_%3.parked" ]; then
-    echo "Assertion failed: Claude UserPromptSubmit should clear the current pane parked override" >&2
     exit 1
 fi
 

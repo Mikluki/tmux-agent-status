@@ -4,7 +4,7 @@
 # Sourced by sidebar-collector.sh (daemon) and optionally sidebar.sh (fallback).
 #
 # Requires the caller to:
-#   - source lib/session-status.sh (for STATUS_DIR, PARKED_DIR, WAIT_DIR)
+#   - source lib/session-status.sh (for STATUS_DIR, WAIT_DIR)
 #   - declare global: ENTRIES, SEL_NAMES, SEL_TYPES, PANE_COUNTS (associative),
 #     KNOWN_AGENTS (associative), LIVE_PANES (associative), PID_PPID (associative),
 #     SESS_START, _COLLECT_TICK, _LAST_STATUS_MTIME
@@ -50,7 +50,7 @@ find_ancestor_pane() {
 _state_pri() {
     case "$1" in
         working) echo 5 ;; wait)    echo 4 ;; ask)     echo 3 ;;
-        done)    echo 2 ;; parked)  echo 1 ;; *)       echo 0 ;;
+        done)    echo 2 ;; *)       echo 0 ;;
     esac
 }
 
@@ -79,9 +79,9 @@ collect_data() {
     (( ++_COLLECT_TICK >= 10 )) && { _COLLECT_TICK=0; _LAST_STATUS_MTIME=""; }
     local cur_mtime
     if [[ "$(uname)" == "Darwin" ]]; then
-        cur_mtime=$(stat -f %m "$STATUS_DIR" "$PARKED_DIR" "$WAIT_DIR" "$PANE_DIR" "$REFRESH_FILE" 2>/dev/null)
+        cur_mtime=$(stat -f %m "$STATUS_DIR" "$WAIT_DIR" "$PANE_DIR" "$REFRESH_FILE" 2>/dev/null)
     else
-        cur_mtime=$(stat -c %Y "$STATUS_DIR" "$PARKED_DIR" "$WAIT_DIR" "$PANE_DIR" "$REFRESH_FILE" 2>/dev/null)
+        cur_mtime=$(stat -c %Y "$STATUS_DIR" "$WAIT_DIR" "$PANE_DIR" "$REFRESH_FILE" 2>/dev/null)
     fi
     if [[ "$cur_mtime" == "$_LAST_STATUS_MTIME" ]]; then
         _COLLECT_CHANGED=0
@@ -128,17 +128,12 @@ collect_data() {
 
         local state="noagent" extra="" is_ssh="" status=""
 
-        if session_is_fully_parked "$sname"; then
-            status="parked"
-        elif [ -f "$STATUS_DIR/${sname}-remote.status" ]; then
+        if [ -f "$STATUS_DIR/${sname}-remote.status" ]; then
             status=$(<"$STATUS_DIR/${sname}-remote.status")
             is_ssh="ssh"
         fi
         if [ -f "$STATUS_DIR/${sname}.status" ]; then
             status=$(<"$STATUS_DIR/${sname}.status")
-        fi
-        if [ "$status" = "parked" ] && ! session_is_fully_parked "$sname"; then
-            status=""
         fi
         if [ "$status" = "wait" ] && [ ! -f "$WAIT_DIR/${sname}.wait" ]; then
             status=""
@@ -250,8 +245,7 @@ collect_data() {
         if [ -f "$pane_file" ]; then
             pane_status=$(<"$pane_file")
         fi
-        # Check per-pane parked/wait overrides
-        [ -f "$PARKED_DIR/${owner}_${pid_id}.parked" ] && pane_status="parked"
+        # Check per-pane wait override
         local pwf="$WAIT_DIR/${owner}_${pid_id}.wait"
         if [ -f "$pwf" ]; then
             local exp=$(<"$pwf")
@@ -266,7 +260,7 @@ collect_data() {
     # ── 5. Re-derive session state from per-pane statuses ──────
     for sname in "${!sess_agents[@]}"; do
         local cur_st="${sess_state[$sname]}"
-        [[ "$cur_st" == "wait" || "$cur_st" == "parked" ]] && continue
+        [[ "$cur_st" == "wait" ]] && continue
         local best_pri=-1 best_st="$cur_st"
         best_pri=$(_state_pri "$best_st" 2>/dev/null || echo 0)
         for ap in ${sess_agents[$sname]}; do
@@ -329,9 +323,8 @@ collect_data() {
             aname="${aname%%:*}"
             local astatus="${ap#*:}"
             astatus="${astatus#*:}"
-            # A session-wide wait snoozes every agent in it. Parked panes
-            # stay hidden (matching collect_status_agents in status-line.sh).
-            if [ "$sstate" = "wait" ] && [ "$astatus" != "parked" ]; then
+            # A session-wide wait snoozes every agent in it.
+            if [ "$sstate" = "wait" ]; then
                 astatus="wait"
             fi
             case "$astatus" in
@@ -519,7 +512,6 @@ collect_data() {
     if [[ "$SIDEBAR_MODE" != "agents" ]]; then
         local inbox=()
         for sname in "${all_sessions[@]}"; do
-            session_is_fully_parked "$sname" && continue
             if [[ -n "${sess_agents[$sname]:-}" ]]; then
                 _get_agent_arr "$sname"
                 local arr=("${_agent_result[@]}")
@@ -648,7 +640,6 @@ collect_data() {
         [[ "$sname" == *-remote ]] && continue
         [[ -n "${sess_seen[$sname]:-}" ]] && continue
         rm -f "$sf" "$STATUS_DIR/${sname}-remote.status"
-        rm -f "$PARKED_DIR/${sname}.parked" "$PARKED_DIR/${sname}_"*.parked
         rm -f "$WAIT_DIR/${sname}.wait" "$WAIT_DIR/${sname}_"*.wait
         rm -f "$STATUS_DIR/panes/${sname}_"*.status "$STATUS_DIR/panes/${sname}_"*.agent
     done

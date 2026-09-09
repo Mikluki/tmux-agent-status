@@ -494,7 +494,6 @@ render() {
                 working) _ic="$YEL"; _icon="${SPINNER_FRAMES[$SPINNER_TICK]}" ;;
                 done)    _ic="$GRN"; _icon="✓" ;;
                 wait)    _ic="$CYN"; _icon="⏸" ;;
-                parked)  _ic="$GRY"; _icon="P" ;;
                 *)       _ic="$GRY"; _icon="·" ;;
             esac
         }
@@ -824,7 +823,7 @@ render() {
     elif (( SEARCH_ACTIVE )); then
         buf+=" ${DIM}type to filter  ⏎ select  esc cancel${RST}\033[K"
     else
-        buf+=" ${DIM}⏎ select  / search  w wait  p park  m mode  q quit${RST}\033[K"
+        buf+=" ${DIM}⏎ select  / search  w wait  m mode  q quit${RST}\033[K"
     fi
 
     # Flush entire frame at once (no flicker)
@@ -1044,14 +1043,6 @@ action_wait() {
     WAIT_INPUT_BUF=""
 }
 
-action_park() {
-    (( SEL_COUNT == 0 )) && return
-    local target="${SEL_NAMES[$SELECTED]}"
-    local ttype="${SEL_TYPES[$SELECTED]}"
-    bash "$CURRENT_DIR/park-target.sh" "$target" "$ttype"
-    _LAST_STATUS_MTIME=""
-}
-
 # ─── Main loop ────────────────────────────────────────────────────
 NEEDS_COLLECT=1
 NEEDS_RENDER=1
@@ -1240,7 +1231,6 @@ while true; do
                     ;;
                 '')  action_switch ;;
                 w)   action_wait; NEEDS_COLLECT=1 ;;
-                p)   action_park; NEEDS_COLLECT=1 ;;
                 m)   "$CURRENT_DIR/sidebar-toggle-mode.sh" >/dev/null 2>&1
                      NEEDS_COLLECT=1
                      ;;

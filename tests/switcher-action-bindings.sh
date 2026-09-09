@@ -26,9 +26,8 @@ assert_not_contains() {
 }
 
 assert_contains '--bind="ctrl-x:' "switcher should use ctrl-x for close"
-assert_contains '--bind="ctrl-p:' "switcher should use ctrl-p for park"
 assert_contains '--bind="ctrl-w:' "switcher should use ctrl-w for wait"
-assert_contains 'ctrl-x close  ctrl-p park  ctrl-w wait' "switcher header should advertise control-key actions"
+assert_contains 'ctrl-x close  ctrl-w wait' "switcher header should advertise control-key actions"
 
 assert_not_contains '--bind="x:' "plain x should not be bound in the switcher"
 assert_not_contains '--bind="p:' "plain p should not be bound in the switcher"

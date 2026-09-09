@@ -11,10 +11,9 @@ FAKE_BIN="$TMP_DIR/bin"
 STATUS_DIR="$TEST_HOME/.cache/tmux-agent-status"
 PANE_DIR="$STATUS_DIR/panes"
 WAIT_DIR="$STATUS_DIR/wait"
-PARKED_DIR="$STATUS_DIR/parked"
 LOG_FILE="$TMP_DIR/tmux.log"
 
-mkdir -p "$FAKE_BIN" "$STATUS_DIR" "$PANE_DIR" "$WAIT_DIR" "$PARKED_DIR"
+mkdir -p "$FAKE_BIN" "$STATUS_DIR" "$PANE_DIR" "$WAIT_DIR"
 
 tab=$'\t'
 cat > "$FAKE_BIN/tmux" <<EOF

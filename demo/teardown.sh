@@ -17,7 +17,6 @@ done
 rm -f "$STATUS_DIR"/demo-*.status
 rm -f "$STATUS_DIR"/demo-*.unread
 rm -f "$STATUS_DIR"/wait/demo-*.wait
-rm -f "$STATUS_DIR"/parked/demo-*.parked
 rm -f "$STATUS_DIR"/panes/demo-*
 
 # Clean temp dir
