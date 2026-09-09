@@ -27,8 +27,10 @@ case "${1:-}" in
     show-option)
         if [ "${3:-}" = "@agent-notification-sound" ]; then
             echo "none"
-            exit 0
         fi
+        exit 0
+        ;;
+    set-option)
         exit 0
         ;;
     *)
@@ -105,7 +107,6 @@ run_status_line() {
     PATH="$FAKE_BIN:$PATH" \
     HOME="$TEST_HOME" \
     PGREP_ACTIVE_WORK="$active_work" \
-    TMUX_AGENT_STATUS_FRAME=0 \
     "$REPO_DIR/scripts/status-line.sh"
 }
 
@@ -113,26 +114,26 @@ echo "done" > "$STATUS_DIR/codex-test.status"
 working_output="$(run_status_line 1)"
 working_status="$(cat "$STATUS_DIR/codex-test.status")"
 assert_eq "working" "$working_status" "active Codex work should flip status back to working"
-assert_eq "#[fg=yellow,bold]⬢#[default]" "$working_output" "active Codex work should render as a working codex glyph"
+assert_eq "#[fg=colour244]·1#[default]" "$working_output" "an unpinned working Codex session should only raise the overflow count"
 
 echo "done" > "$STATUS_DIR/codex-test.status"
 idle_output="$(run_status_line 0)"
 idle_status="$(cat "$STATUS_DIR/codex-test.status")"
 assert_eq "done" "$idle_status" "idle Codex session should stay done"
-assert_eq "#[fg=green]⬢#[default]" "$idle_output" "idle Codex session should render as done"
+assert_eq "#[fg=green]·1#[default]" "$idle_output" "an idle Codex session should turn the overflow count green"
 
 echo "done" > "$STATUS_DIR/codex-test.status"
 echo "done" > "$PANE_DIR/codex-test_%9.status"
 hook_output="$(run_status_line 1)"
 hook_status="$(cat "$STATUS_DIR/codex-test.status")"
 assert_eq "done" "$hook_status" "hook-tracked Codex sessions should not be reactivated by process polling"
-assert_eq "#[fg=green]⬢#[default]" "$hook_output" "hook-tracked done sessions should stay done in the status line"
+assert_eq "#[fg=green]·1#[default]" "$hook_output" "hook-tracked done sessions should stay done in the status line"
 rm -f "$PANE_DIR/codex-test_%9.status"
 
 rm -f "$STATUS_DIR/codex-test.status"
 first_seen_output="$(run_status_line 0)"
 first_seen_status="$(cat "$STATUS_DIR/codex-test.status")"
 assert_eq "working" "$first_seen_status" "first seen Codex session should default to working"
-assert_eq "#[fg=yellow,bold]⬢#[default]" "$first_seen_output" "first seen Codex session should render as working"
+assert_eq "#[fg=colour244]·1#[default]" "$first_seen_output" "first seen Codex session should count as working"
 
 echo "status-line Codex regression checks passed"

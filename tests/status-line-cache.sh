@@ -28,12 +28,9 @@ trap 'kill "$collector_pid" 2>/dev/null; rm -rf "$TMP_DIR"' EXIT
 printf '%s\n' "$collector_pid" > "$STATUS_DIR/.sidebar-collector.pid"
 
 run_status_line() {
-    local frame="$1"
-
     PATH="$FAKE_BIN:$PATH" \
     HOME="$TEST_HOME" \
     TMUX_LOG="$LOG_FILE" \
-    TMUX_AGENT_STATUS_FRAME="$frame" \
     "$REPO_DIR/scripts/status-line.sh"
 }
 
@@ -50,15 +47,16 @@ assert_eq() {
     fi
 }
 
-# Two-line cache: one line per animation frame.
-printf '%s\n%s\n' "frame-zero summary" "frame-one summary" > "$STATUS_DIR/.status-line"
+# The cache is a single pre-rendered line: nothing on the bar depends on the
+# clock, so there is no frame to pick.
+printf '%s\n' "#[fg=green,bold]cached summary#[default]" > "$STATUS_DIR/.status-line"
+assert_eq "#[fg=green,bold]cached summary#[default]" "$(run_status_line)" "the cache line should render as-is"
+assert_eq "$(run_status_line)" "$(run_status_line)" "consecutive reads of an unchanged cache should be identical"
 
-assert_eq "frame-zero summary" "$(run_status_line 0)" "frame 0 should render the first cache line"
-assert_eq "frame-one summary" "$(run_status_line 1)" "frame 1 should render the second cache line"
-
-# Legacy single-line cache written by an older collector.
-printf '%s' "#[fg=green,bold]cached summary#[default]" > "$STATUS_DIR/.status-line"
-assert_eq "#[fg=green,bold]cached summary#[default]" "$(run_status_line 1)" "single-line caches should render as-is"
+# Legacy two-line cache left behind by an older collector: the first line is
+# a complete summary, so it renders until the collector republishes.
+printf '%s\n%s\n' "stale frame zero" "stale frame one" > "$STATUS_DIR/.status-line"
+assert_eq "stale frame zero" "$(run_status_line)" "a stale multi-line cache should render its first line"
 
 if [ -f "$LOG_FILE" ]; then
     echo "status-line should not invoke tmux when collector cache is live" >&2

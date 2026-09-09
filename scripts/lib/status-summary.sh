@@ -3,80 +3,79 @@
 [[ -n "${_STATUS_SUMMARY_LOADED:-}" ]] && return 0
 _STATUS_SUMMARY_LOADED=1
 
-# The status bar shows one glyph per agent. The glyph identifies the agent
-# type, the colour identifies its status, and working agents flip between
-# two glyph frames once per second (tmux status-interval is 1) so busy
-# agents visibly pulse while idle ones hold still.
+_STATUS_SUMMARY_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=pins.sh
+source "$_STATUS_SUMMARY_LIB_DIR/pins.sh"
+
+# The status bar is a watchlist, not a census: it shows the agents you pinned,
+# each as its tag, coloured by state. Nothing on the bar varies with time —
+# no durations and no animation — so a glance costs nothing when nothing has
+# changed. Age lives in the picker instead.
 #
-# Agents are passed around as "name:status" specs, e.g. "codex:working".
+#     bug  rfc✓  perf   ·6
+#
+# The trailing "·N" counts the agents you did not pin, and turns green when
+# one of them is done or asking. It is the insurance against an opt-in
+# watchlist quietly losing a finished agent.
 
-# Per-agent-type glyph frames: "frameA frameB". Text-presentation symbols
-# (not emoji) so tmux colour styles apply.
-agent_glyph_frames() {
-    case "$1" in
-        claude) echo "✳ ✻" ;;
-        codex)  echo "⬢ ⬡" ;;
-        devin)  echo "◆ ◇" ;;
-        *)      echo "● ○" ;;
-    esac
-}
-
-# Per-status tmux style prefix.
+# Per-state tmux style prefix.
 agent_status_style() {
     case "$1" in
         working) echo "#[fg=yellow,bold]" ;;
-        wait)    echo "#[fg=cyan]" ;;
         ask)     echo "#[fg=magenta,bold]" ;;
+        wait)    echo "#[fg=cyan,dim]" ;;
+        dead)    echo "#[fg=colour244]" ;;
         *)       echo "#[fg=green]" ;;
     esac
 }
 
-# Current animation frame (0 or 1), derived from the wall clock.
-# TMUX_AGENT_STATUS_FRAME overrides it so tests stay deterministic.
-status_summary_frame() {
-    if [ -n "${TMUX_AGENT_STATUS_FRAME:-}" ]; then
-        printf '%s\n' "$TMUX_AGENT_STATUS_FRAME"
-        return
-    fi
-    local now
-    printf -v now '%(%s)T' -1
-    printf '%s\n' $(( now % 2 ))
+# Per-state mark appended to the tag. Working and waiting agents stay bare so
+# the two states that need you stand out without reading colour.
+agent_status_mark() {
+    case "$1" in
+        ask)  echo "?" ;;
+        done) echo "✓" ;;
+        *)    echo "" ;;
+    esac
 }
 
-# render_status_summary <frame> [name:status ...]
-# One glyph per agent spec, in the order given.
+# render_status_summary [pane_id<TAB>state ...]
+# One tag per pinned agent, in pin order, plus the unpinned overflow count.
 render_status_summary() {
-    local frame="$1"
-    shift
+    local resolved=()
+    mapfile -t resolved < <(printf '%s\n' "$@" | pins_render_specs)
 
-    if [ "$#" -eq 0 ]; then
-        echo ""
-        return
+    local overflow=0 alert=0
+    IFS=':' read -r overflow alert <<< "${resolved[0]:-0:0}"
+
+    # Two spaces between tags; a wider gap before the overflow count so the
+    # watchlist and the counter read as two separate things.
+    local out="" spec tag state
+    local i=1
+    while (( i < ${#resolved[@]} )); do
+        spec="${resolved[$i]}"
+        i=$((i + 1))
+        [ -n "$spec" ] || continue
+        tag="${spec%:*}"
+        state="${spec##*:}"
+        [ -n "$out" ] && out+="  "
+        out+="$(agent_status_style "$state")${tag}$(agent_status_mark "$state")#[default]"
+    done
+
+    if (( overflow > 0 )); then
+        local overflow_style="#[fg=colour244]"
+        (( alert )) && overflow_style="#[fg=green]"
+        [ -n "$out" ] && out+="   "
+        out+="${overflow_style}·${overflow}#[default]"
     fi
 
-    local spec name status glyph_a glyph_b glyph
-    local i=0
-    local parts=()
-    for spec in "$@"; do
-        name="${spec%%:*}"
-        status="${spec#*:}"
-        read -r glyph_a glyph_b <<< "$(agent_glyph_frames "$name")"
-        glyph="$glyph_a"
-        if [ "$status" = "working" ] && (( (frame + i) % 2 == 1 )); then
-            glyph="$glyph_b"
-        fi
-        parts+=("$(agent_status_style "$status")${glyph}#[default]")
-        i=$((i + 1))
-    done
-    printf '%s\n' "${parts[*]}"
+    printf '%s\n' "$out"
 }
 
-# write_status_summary_cache <working> <waiting> <done> <total> [name:status ...]
+# write_status_summary_cache <working> <waiting> <done> <total> [pane_id<TAB>state ...]
 # The counts feed the counts file (used for done-notification diffing); the
-# agent specs feed the rendered cache. The cache stores one line per
-# animation frame; the status line picks the line matching the current frame
-# so the animation keeps running even when the collector has no data changes
-# to publish.
+# agents feed the rendered cache. The cache is a single pre-rendered line —
+# nothing on the bar depends on the clock, so there is nothing to pick between.
 write_status_summary_cache() {
     local working="$1"
     local waiting="$2"
@@ -86,9 +85,6 @@ write_status_summary_cache() {
 
     printf '%s\n' "$working:$waiting:$done:$total_agents" > "${STATUS_LINE_COUNTS_FILE}.tmp"
     mv -f "${STATUS_LINE_COUNTS_FILE}.tmp" "$STATUS_LINE_COUNTS_FILE"
-    {
-        render_status_summary 0 "$@"
-        render_status_summary 1 "$@"
-    } > "${STATUS_LINE_CACHE_FILE}.tmp"
+    render_status_summary "$@" > "${STATUS_LINE_CACHE_FILE}.tmp"
     mv -f "${STATUS_LINE_CACHE_FILE}.tmp" "$STATUS_LINE_CACHE_FILE"
 }

@@ -11,6 +11,8 @@ WAIT_DIR="$STATUS_DIR/wait"
 source "$SCRIPT_DIR/lib/session-status.sh"
 # shellcheck source=lib/selection-targets.sh
 source "$SCRIPT_DIR/lib/selection-targets.sh"
+# shellcheck source=lib/pins.sh
+source "$SCRIPT_DIR/lib/pins.sh"
 
 status_icon() {
     case "$1" in
@@ -42,6 +44,39 @@ best_status_for_panes() {
     done
 
     printf '%s\n' "$best_status"
+}
+
+# How long a pane has held its current state, from the mtime of the status
+# file the hooks rewrite on every transition. No extra bookkeeping: if there
+# is no status file there is no age, and the column stays blank.
+pane_age() {
+    local session="$1"
+    local pane_id="$2"
+    local pane_file="$PANE_DIR/${session}_${pane_id}.status"
+    local mtime="" now elapsed
+
+    [ -f "$pane_file" ] || return 0
+
+    if [[ "$(uname)" == "Darwin" ]]; then
+        mtime=$(stat -f %m "$pane_file" 2>/dev/null || echo "")
+    else
+        mtime=$(stat -c %Y "$pane_file" 2>/dev/null || echo "")
+    fi
+    [ -n "$mtime" ] || return 0
+
+    printf -v now '%(%s)T' -1
+    elapsed=$(( now - mtime ))
+    (( elapsed < 0 )) && elapsed=0
+
+    if (( elapsed < 60 )); then
+        printf '%ds\n' "$elapsed"
+    elif (( elapsed < 3600 )); then
+        printf '%dm\n' "$(( elapsed / 60 ))"
+    elif (( elapsed < 86400 )); then
+        printf '%dh\n' "$(( elapsed / 3600 ))"
+    else
+        printf '%dd\n' "$(( elapsed / 86400 ))"
+    fi
 }
 
 pane_agent_badge() {
@@ -291,6 +326,9 @@ get_switcher_list() {
 # Flat list of every agent pane (any status), sorted by agents-mode
 # priority then by tmux list-panes order. Emits the same `P\t<session>:<pane_id>\t<display>`
 # row shape as get_switcher_rows so the existing fzf bindings continue to work.
+#
+# The tag column is blank when a pane is unpinned, so it doubles as the pin
+# indicator — there is no separate marker to read.
 get_agents_rows() {
     local tab=$'\t'
 
@@ -309,19 +347,21 @@ get_agents_rows() {
             *) continue ;;
         esac
 
-        local pri icon agent badge=""
+        local pri icon agent badge="" tag age
         pri=$(agents_mode_priority "$status")
         icon=$(status_icon "$status")
+        tag=$(pin_tag_for "$pane_id" || true)
+        age=$(pane_age "$session" "$pane_id")
 
         agent=""
         [ -f "$PANE_DIR/${session}_${pane_id}.agent" ] && agent=$(<"$PANE_DIR/${session}_${pane_id}.agent")
         [ -n "$agent" ] && badge=" [$agent]"
 
         # SORTKEY \t row …  SORTKEY = pri (desc) + order (asc)
-        printf '%d\t%010d\tP\t%s:%s\t%b  %-7s  %s:%s.%s%s  %s\n' \
+        printf '%d\t%010d\tP\t%s:%s\t%b  %-4s  %-7s  %-4s  %s:%s.%s%s  %s\n' \
             "$pri" "$order" \
             "$session" "$pane_id" \
-            "$icon" "$status" "$session" "$win_idx" "${pane_id#%}" "$badge" "$win_name"
+            "$icon" "$tag" "$status" "$age" "$session" "$win_idx" "${pane_id#%}" "$badge" "$win_name"
 
         order=$((order + 1))
     done < <(tmux list-panes -a -F \
@@ -500,19 +540,14 @@ case "${SWITCHER_COMMAND:-}" in
         exit 0
         ;;
     --tab-action)
-        # Tab key behavior depends on current mode:
+        # ctrl-i and tab are the same byte, so one binding covers both.
+        # Behaviour depends on the current mode:
         #   tree   → expand/collapse session/window then reload rows
-        #   agents → toggle preview pane. When wrapped by the popup-loop
-        #            we abort + relaunch the popup with new dimensions;
-        #            otherwise (window display-method) we change the
-        #            preview-window in-place.
+        #   agents → pin: abort the picker and open a tmux prompt prefilled
+        #            with the row's tag. Pinning is agents-mode only; tree
+        #            mode keeps the structural navigation it needs.
         if [ "$(current_mode)" = "agents" ]; then
-            if [ -n "${TMUX_AGENT_SWITCHER_STATE_DIR:-}" ]; then
-                printf "execute-silent(bash %q --state-dir %q --request-relaunch toggle-preview)+abort\n" \
-                    "$0" "$SWITCHER_STATE_DIR"
-            else
-                printf 'change-preview-window(right,65%%,border-left,wrap|right,65%%,border-left,wrap,hidden)\n'
-            fi
+            printf "execute-silent(bash %q {2} {1})+abort\n" "$SCRIPT_DIR/pin-target.sh"
         else
             printf "execute-silent(bash %q --state-dir %q --toggle-expand {2} {1})+reload(bash %q --state-dir %q --rows)\n" \
                 "$0" "$SWITCHER_STATE_DIR" "$0" "$SWITCHER_STATE_DIR"
@@ -653,12 +688,15 @@ else
     preview_hidden_flag=""
 fi
 
-# ctrl-f binding: when wrapped by popup-loop, abort + relaunch with new
-# popup geometry; otherwise toggle in-place (window display-method).
+# ctrl-f and ctrl-p bindings: when wrapped by popup-loop, abort + relaunch
+# with new popup geometry (a popup cannot be resized in flight); otherwise
+# toggle in-place (window display-method).
 if [ -n "${TMUX_AGENT_SWITCHER_STATE_DIR:-}" ]; then
     ctrl_f_bind="execute-silent(bash '$0' --state-dir '$state_dir' --request-relaunch toggle-mode)+abort"
+    ctrl_p_bind="execute-silent(bash '$0' --state-dir '$state_dir' --request-relaunch toggle-preview)+abort"
 else
     ctrl_f_bind="execute-silent(bash '$0' --state-dir '$state_dir' --toggle-mode)+reload(bash '$0' --state-dir '$state_dir' --rows)+transform(bash '$0' --state-dir '$state_dir' --preview-action)"
+    ctrl_p_bind="change-preview-window(right,65%,border-left,wrap|right,65%,border-left,wrap,hidden)"
 fi
 
 selected=$(emit_rows_for_mode | fzf \
@@ -670,11 +708,12 @@ selected=$(emit_rows_for_mode | fzf \
     --preview='id={2}; tmux capture-pane -e -p -t "${id##*:}" -S -120 2>/dev/null' \
     --preview-window="right,65%,border-left,wrap${preview_hidden_flag}" \
     --prompt="  " \
-    --header=$'\033[90mctrl-f mode  tab expand/preview  ctrl-x close  ctrl-w wait  ctrl-r reset\033[0m' \
+    --header=$'\033[90mctrl-f mode  ctrl-i expand/pin  ctrl-p preview  ctrl-x close  ctrl-w wait  ctrl-r reset\033[0m' \
     --header-first \
     --bind="ctrl-j:down,ctrl-k:up" \
     --bind="tab:transform(bash '$0' --state-dir '$state_dir' --tab-action)" \
     --bind="ctrl-f:$ctrl_f_bind" \
+    --bind="ctrl-p:$ctrl_p_bind" \
     --bind="ctrl-w:execute-silent(bash '$SCRIPT_DIR/wait-target.sh' {2} {1})+abort" \
     --bind="ctrl-r:reload(bash '$0' --state-dir '$state_dir' --reset-rows)" \
     --bind="ctrl-x:transform(bash '$0' --state-dir '$state_dir' --close-fzf-actions {2} {1})" \

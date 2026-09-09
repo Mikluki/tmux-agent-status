@@ -21,14 +21,10 @@ if [ -f "$COLLECTOR_PID_FILE" ]; then
 fi
 
 if (( collector_running )) && [ -f "$STATUS_LINE_CACHE_FILE" ]; then
-    # The cache holds one line per animation frame; older caches hold a
-    # single pre-rendered line.
-    mapfile -t cache_frames < "$STATUS_LINE_CACHE_FILE"
-    if (( ${#cache_frames[@]} > 1 )); then
-        printf '%s\n' "${cache_frames[$(status_summary_frame)]}"
-    else
-        printf '%s\n' "${cache_frames[0]:-}"
-    fi
+    # The cache is one pre-rendered line. Older caches held one line per
+    # animation frame; reading only the first line renders those too.
+    IFS= read -r cached_summary < "$STATUS_LINE_CACHE_FILE" || true
+    printf '%s\n' "${cached_summary:-}"
     exit 0
 fi
 
@@ -172,16 +168,15 @@ count_agent_status() {
     echo "$working:$waiting:$done:$total_agents"
 }
 
-# Build the per-agent "name:status" list shown in the status bar, ordered
-# by session then pane id. Hook-tracked panes contribute one spec each;
-# sessions tracked only at session level contribute a single spec typed via
-# process detection.
-collect_status_agents() {
+# Every tracked agent as a "pane_id<TAB>status" line, for the watchlist to
+# resolve against. Hook-tracked panes contribute one line each; a session
+# tracked only at session level contributes a single unpinnable line, which
+# still counts toward the overflow tally.
+collect_tracked_agents() {
     local session
     while IFS= read -r session; do
         [ -z "$session" ] && continue
 
-        local detected_name=""
         local emitted=0
 
         # A session-wide wait snoozes every agent in the session.
@@ -191,8 +186,9 @@ collect_status_agents() {
             session_wait=1
         fi
 
+        # -s so every window's panes are listed, not just the current one.
         local live_panes
-        live_panes=$'\n'"$(tmux list-panes -t "$session" -F '#{pane_id}' 2>/dev/null)"$'\n'
+        live_panes=$'\n'"$(tmux list-panes -s -t "$session" -F '#{pane_id}' 2>/dev/null)"$'\n'
 
         local pane_file
         for pane_file in "$PANE_DIR/${session}_"*.status; do
@@ -210,15 +206,7 @@ collect_status_agents() {
                 *) continue ;;
             esac
 
-            local aname=""
-            if [ -f "$PANE_DIR/${session}_${pane_id}.agent" ]; then
-                aname=$(cat "$PANE_DIR/${session}_${pane_id}.agent" 2>/dev/null)
-            fi
-            if [ -z "$aname" ]; then
-                [ -z "$detected_name" ] && detected_name=$(find_session_agent_name "$session")
-                aname="$detected_name"
-            fi
-            printf '%s:%s\n' "$aname" "$astatus"
+            printf '%s\t%s\n' "$pane_id" "$astatus"
             emitted=1
         done
 
@@ -230,8 +218,7 @@ collect_status_agents() {
             working|wait|done|ask) ;;
             *) continue ;;
         esac
-        [ -z "$detected_name" ] && detected_name=$(find_session_agent_name "$session")
-        printf '%s:%s\n' "$detected_name" "$status"
+        printf 'session:%s\t%s\n' "$session" "$status"
     done < <(tmux list-sessions -F "#{session_name}" 2>/dev/null)
 }
 
@@ -256,5 +243,5 @@ if [ -n "$prev_done" ] && [ "$done" -gt "$prev_done" ]; then
     "$SCRIPT_DIR/play-sound.sh" &
 fi
 
-mapfile -t agent_specs < <(collect_status_agents)
-render_status_summary "$(status_summary_frame)" "${agent_specs[@]}"
+mapfile -t tracked_agents < <(collect_tracked_agents)
+render_status_summary "${tracked_agents[@]}"

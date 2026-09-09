@@ -14,7 +14,7 @@ Demo video: [`demo/full.mp4`](demo/full.mp4)
 - Hierarchical `fzf` target switcher for quick jumps and close actions
 - Hook-based Claude Code and Codex tracking
 - Wait mode for triaging work
-- Compact status-line summary with finish notifications
+- Pinned status-line watchlist with finish notifications
 - Works across multi-pane sessions, worktrees, and remote tmux sessions
 
 ## Supported Agents
@@ -269,40 +269,54 @@ Default mode is sidebar-first:
 | `prefix + N` | Jump to the next inbox item in inbox order |
 | `prefix + W` | Put the current session or pane into timed wait mode |
 
-The status bar shows one glyph per agent. The glyph identifies the agent,
-the colour identifies its status:
+The status bar is a watchlist: it shows the agents you pinned, each as a
+short tag coloured by state, and collapses everything else into one counter.
 
-| Agent | Glyph |
-|-------|-------|
-| Claude | `✳` |
-| Codex | `⬢` |
-| Devin | `◆` |
-| Other | `●` |
+```text
+bug  rfc✓  perf?   ·6
+```
 
-| Status | Colour |
-|--------|--------|
-| working | yellow, pulsing (`✳`/`✻`, `⬢`/`⬡`, …) |
-| waiting | cyan |
-| ask | magenta |
-| done | green |
+| State | Tag |
+|-------|-----|
+| working | yellow, bare |
+| waiting | cyan, dim, bare |
+| ask | magenta, `?` |
+| done | green, `✓` |
+| pane gone | dim grey, bare |
 
-For example two Claude agents working alongside a finished Codex agent
-renders as two yellow Claude glyphs next to a green `⬢`. Each working
-glyph flips frames every second, staggered by position (`✳ ✻` one second,
-`✻ ✳` the next) so a row of busy agents pulses rather than blinking in
-unison. Glyphs and colours are defined in
+Tags are assigned when you pin (`ctrl-i` in the switcher's agents view), are
+1-4 characters, must be unique, and keep the order you pinned them in — the
+bar is never re-sorted, so where a tag sits is part of how you read it.
+Nothing on the bar varies with time: no durations and no animation, so a
+glance costs nothing when nothing has changed. Age lives in the picker
+instead.
+
+The trailing `·N` counts the agents you did not pin. It is dim grey normally
+and turns green when one of them is done or asking, so an opt-in watchlist
+cannot quietly lose a finished agent.
+
+When a pinned pane dies, its pin is dropped if the agent had finished, and
+otherwise held in dim grey until you unpin it. Pins last as long as the tmux
+server and are not written to disk: pane ids are recycled across restarts,
+and a saved pin would latch onto an unrelated pane. Colours are defined in
 [`scripts/lib/status-summary.sh`](scripts/lib/status-summary.sh) if you want
 different ones.
 
 Inside the popup switcher:
 
 - `Enter` switches to the selected session, window, or pane
-- `Tab` expands or collapses the selected session or window
+- `Ctrl-I` (`Tab`) expands or collapses the selected session or window in tree view, and pins in agents view
+- `Ctrl-P` shows or hides the preview pane
 - `Ctrl-X` closes the selected pane immediately
 - `Ctrl-X` on a window immediately closes that window and all child panes
 - `Ctrl-X` on a session immediately closes that session and all child windows and panes
 - `Ctrl-W` opens wait mode for the selected target, or cancels an existing wait
 - `Ctrl-R` resets tracked state
+
+In the agents view, `Ctrl-I` opens a prompt prefilled with the row's tag, or
+a tag derived from its window name when the row is unpinned. Entering text
+pins or renames; entering nothing unpins; a tag another agent already holds
+is rejected.
 
 Inside the sidebar:
 
@@ -338,7 +352,7 @@ set -g @agent-switcher-default-mode "tree"  # tree | agents
 
 `@agent-switcher-style "both"` is the default. It keeps the persistent sidebar and leaves `prefix + S` as the lightweight popup switcher.
 
-The switcher popup has two views. **Tree** (default) is the hierarchical session/window/pane list; tab expands/collapses. **Agents** is a flat list of every agent pane (any status) sorted by priority — `ask`, `done`, `working`, `wait` — with a live preview pane and 2-second refresh. Press `ctrl-f` inside the popup to toggle between views.
+The switcher popup has two views. **Tree** (default) is the hierarchical session/window/pane list; `ctrl-i` expands/collapses. **Agents** is a flat list of every agent pane (any status) sorted by priority — `ask`, `done`, `working`, `wait` — with a tag column, the age of each agent's current state, a live preview pane, and 2-second refresh. The tag column is blank for unpinned agents, so it doubles as the pin indicator. Press `ctrl-f` inside the popup to toggle between views.
 
 The sidebar has the same two views, toggled with `m` from inside the sidebar pane (alongside `w`/`x` for wait/close). In **tree** mode the SESSIONS section lists every session and collapses single-agent sessions to one row; the INBOX section surfaces `done`/`ask` work. In **agents** mode the SESSIONS section is filtered to sessions/worktrees that contain agent panes and every agent pane is expanded; INBOX is suppressed because it would duplicate the same rows.
 

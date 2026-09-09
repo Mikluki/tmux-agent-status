@@ -11,7 +11,7 @@
 #
 # Populates: ENTRIES[], SEL_NAMES[], SEL_TYPES[], PANE_COUNTS[], SESS_START,
 #            SUMMARY_WORKING, SUMMARY_WAITING, SUMMARY_DONE, SUMMARY_TOTAL,
-#            SUMMARY_HAS_WORKING, SUMMARY_AGENTS[]
+#            SUMMARY_HAS_WORKING, SUMMARY_AGENTS[] ("pane_id<TAB>state")
 # Persists across calls: LIVE_PANES[]
 # Sets _COLLECT_CHANGED=1 when data was rebuilt, 0 when skipped (no changes).
 
@@ -296,15 +296,13 @@ collect_data() {
         esac
     done
 
-    # ── 5a'. Per-agent status-line list ─────────────────────────
-    # One "name:status" spec per agent, ordered by session name then pane
-    # id so glyph positions in the status bar stay stable across refreshes.
-    # Sessions with detected agent panes contribute one spec per pane;
-    # sessions tracked only at session level (e.g. SSH remotes) contribute
-    # a single generic spec.
+    # ── 5a'. Tracked-agent list for the status-line watchlist ───
+    # One "pane_id<TAB>state" entry per agent. The status bar shows only the
+    # pinned ones, in pin order, so the order here does not matter — the rest
+    # just feed the overflow tally. A session tracked only at session level
+    # (e.g. an SSH remote) contributes a single unpinnable entry.
     SUMMARY_AGENTS=()
-    while IFS= read -r sname; do
-        [ -z "$sname" ] && continue
+    for sname in "${!sess_state[@]}"; do
         local sstate="${sess_state[$sname]}"
         case "$sstate" in
             working|wait|done|ask) ;;
@@ -312,15 +310,13 @@ collect_data() {
         esac
 
         if [ -z "${sess_agents[$sname]:-}" ]; then
-            SUMMARY_AGENTS+=("agent:${sstate}")
+            SUMMARY_AGENTS+=("session:${sname}"$'\t'"${sstate}")
             continue
         fi
 
         local ap
-        while IFS= read -r ap; do
-            [ -z "$ap" ] && continue
-            local aname="${ap#*:}"
-            aname="${aname%%:*}"
+        for ap in ${sess_agents[$sname]}; do
+            local apane="${ap%%:*}"
             local astatus="${ap#*:}"
             astatus="${astatus#*:}"
             # A session-wide wait snoozes every agent in it.
@@ -329,11 +325,11 @@ collect_data() {
             fi
             case "$astatus" in
                 working|wait|done|ask)
-                    SUMMARY_AGENTS+=("${aname}:${astatus}")
+                    SUMMARY_AGENTS+=("${apane}"$'\t'"${astatus}")
                     ;;
             esac
-        done < <(printf '%s\n' ${sess_agents[$sname]} | sort)
-    done < <(printf '%s\n' "${!sess_state[@]}" | sort)
+        done
+    done
 
     # ── 5b. Compute per-session pane counts ─────────────────────
     PANE_COUNTS=()
