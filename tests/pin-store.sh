@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# The pin store and the ctrl-i path through pin-target.sh: pinning, renaming,
-# unpinning, rejected duplicates, and the free tag derived for an unpinned row.
+# The pin store and pin-target.sh: m/ctrl-i toggles a pin under the derived
+# tag, r/ctrl-r prompts to pin or rename; rejected tags and duplicates, and
+# the free tag derived for an unpinned row.
 set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -127,7 +128,7 @@ assert_eq "rfc=%14 " "$(pins_summary)" "unpinning should drop just that pin"
 pin_remove "%14"
 assert_eq "" "$(pins_summary)" "unpinning the last pin should empty the store"
 
-# ── The ctrl-i path, end to end ───────────────────────────────────
+# ── The prompt callback (r / ctrl-r), end to end ───────────────────────────────────
 apply() {
     "$REPO_DIR/scripts/pin-target.sh" --apply "$@" >/dev/null 2>&1
 }
@@ -148,12 +149,45 @@ apply "%14" "far-too-long"
 assert_eq "task=%12 " "$(pins_summary)" "--apply should refuse an over-long tag"
 grep -q "1-4 characters" "$MESSAGE_LOG" || { echo "Assertion failed: an invalid tag should be reported" >&2; exit 1; }
 
+: > "$MESSAGE_LOG"
 apply "%12" ""
-assert_eq "" "$(pins_summary)" "--apply with no text should unpin"
+assert_eq "task=%12 " "$(pins_summary)" "--apply with no text should leave the pin alone"
+[ -s "$MESSAGE_LOG" ] && { echo "Assertion failed: an empty reply should be silent" >&2; exit 1; }
+apply "%14" ""
+assert_eq "task=%12 " "$(pins_summary)" "--apply with no text should not pin an unpinned pane"
+pin_remove "%12"
+
+# ── The toggle (m / ctrl-i) ───────────────────────────────────────
+toggle() {
+    "$REPO_DIR/scripts/pin-target.sh" --toggle "$@" >/dev/null 2>&1
+}
+
+: > "$MESSAGE_LOG"
+toggle "api:%12"
+assert_eq "wor=%12 " "$(pins_summary)" "toggling an unpinned row should pin it under the derived tag"
+grep -q "command-prompt" "$MESSAGE_LOG" && { echo "Assertion failed: the toggle should not prompt" >&2; exit 1; }
+[ -s "$MESSAGE_LOG" ] && { echo "Assertion failed: a successful pin should be silent" >&2; cat "$MESSAGE_LOG" >&2; exit 1; }
+
+toggle "api:%14"
+assert_eq "wor=%12 wor2=%14 " "$(pins_summary)" "a second agent in a same-named window should take the next free variant"
+
+pin_set "%12" "bug"
+toggle "api:%12"
+assert_eq "wor2=%14 " "$(pins_summary)" "toggling a pinned row should unpin it, whatever its tag"
+
+for n in "" 3 4 5 6 7 8 9; do pin_set "%6$n" "wor$n"; done
+: > "$MESSAGE_LOG"
+toggle "api:%12"
+pin_tag_for "%12" && { echo "Assertion failed: a toggle with no free tag should not pin" >&2; exit 1; }
+grep -q "already taken" "$MESSAGE_LOG" || { echo "Assertion failed: a toggle with no free tag should be reported" >&2; exit 1; }
+for n in "" 3 4 5 6 7 8 9; do pin_remove "%6$n"; done
+pin_remove "%14"
+toggle "api"
+assert_eq "" "$(pins_summary)" "a toggle on a row without a pane should do nothing"
 
 # ── The prompt itself ─────────────────────────────────────────────
 : > "$MESSAGE_LOG"
-"$REPO_DIR/scripts/pin-target.sh" "api:%12" "P" >/dev/null 2>&1
+"$REPO_DIR/scripts/pin-target.sh" --rename "api:%12" >/dev/null 2>&1
 grep -q -- "-I wor" "$MESSAGE_LOG" || {
     echo "Assertion failed: the prompt should be prefilled with the derived tag" >&2
     cat "$MESSAGE_LOG" >&2

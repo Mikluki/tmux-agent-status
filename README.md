@@ -284,7 +284,7 @@ bug  rfc✓  perf?   ·6
 | done | green, `✓` |
 | pane gone | muted (bright black), bare |
 
-Tags are assigned when you pin (`ctrl-i` in the switcher's agents view), are
+Tags are assigned when you pin (`m` or `ctrl-i` in the switcher's agents view), are
 1-4 characters, must be unique, and keep the order you pinned them in — the
 bar is never re-sorted, so where a tag sits is part of how you read it.
 Nothing on the bar varies with time: no durations and no animation, so a
@@ -311,17 +311,23 @@ unset or expands to nothing uses the default.
 Inside the popup switcher:
 
 - `Enter` switches to the selected session, window, or pane
-- `Ctrl-I` (`Tab`) expands or collapses the selected session or window in tree view, and pins in agents view
+- `Ctrl-I` (`Tab`) expands or collapses the selected session or window in tree view, and pins or unpins in agents view
+- `Ctrl-R` pins under a tag you type, or renames a pin, in agents view
 - `Ctrl-P` shows or hides the preview pane
 - `Ctrl-X` closes the selected pane immediately
 - `Ctrl-X` on a window immediately closes that window and all child panes
 - `Ctrl-X` on a session immediately closes that session and all child windows and panes
 
-In the agents view, `Ctrl-I` opens a prompt prefilled with the row's tag, or
-a tag derived from its window name when the row is unpinned: the first three
-characters, or the first free of those plus 2-9 (`wor`, `wor2`, `wor3`) when
-another agent already holds it. Entering text pins or renames; entering
-nothing unpins; a tag another agent already holds is rejected.
+In the agents view, `m` / `Ctrl-I` pins an unpinned row straight away under
+a tag derived from its window name: the first three characters, or the first
+free of those plus 2-9 (`wor`, `wor2`, `wor3`) when another agent already
+holds it. On a pinned row it unpins. The picker stays open and the tag column
+updates in place.
+
+`r` / `Ctrl-R` closes the picker and opens a prompt prefilled with the row's
+tag (or the derived one when unpinned); Enter pins or renames. An empty reply
+or `Esc` changes nothing, and an invalid tag or one another agent already
+holds is rejected with a message.
 
 Inside the sidebar:
 
@@ -368,7 +374,7 @@ set -g @agent-status-color-muted   "default"    # ·N count and dead pins
 
 The switcher popup has two views. **Tree** (default) is the hierarchical session/window/pane list; `ctrl-i` expands/collapses. **Agents** is a flat list of every agent pane (any status) sorted by priority — `ask`, `done`, `working`, `wait` — with a tag column, the age of each agent's current state, a live preview pane, and 2-second refresh. The tag column is blank for unpinned agents, so it doubles as the pin indicator. Press `ctrl-f` inside the popup to toggle between views.
 
-The picker is modal. It opens in **normal** mode (prompt `›`): `j`/`k` move, `enter` switches, `m` pins, `p` toggles the preview, `x` closes, and `q` or `esc` quits; other keys do nothing. `i` or `/` enters **insert** mode (prompt `/`), where typing filters the list; `esc` returns to normal mode and keeps the filter. `ctrl-i`/`tab`, `ctrl-p`/`ctrl-f`, `ctrl-x` and `ctrl-j`/`ctrl-k` work in both modes.
+The picker is modal. It opens in **normal** mode (prompt `›`): `j`/`k` move, `enter` switches, `m` pins or unpins, `r` renames, `p` toggles the preview, `x` closes, and `q` or `esc` quits; other keys do nothing. `i` or `/` enters **insert** mode (prompt `/`), where typing filters the list; `esc` returns to normal mode and keeps the filter. `ctrl-i`/`tab`, `ctrl-r`, `ctrl-p`/`ctrl-f`, `ctrl-x` and `ctrl-j`/`ctrl-k` work in both modes.
 
 The sidebar has the same two views, toggled with `m` from inside the sidebar pane (alongside `w`/`x` for wait/close). In **tree** mode the SESSIONS section lists every session and collapses single-agent sessions to one row; the INBOX section surfaces `done`/`ask` work. In **agents** mode the SESSIONS section is filtered to sessions/worktrees that contain agent panes and every agent pane is expanded; INBOX is suppressed because it would duplicate the same rows.
 

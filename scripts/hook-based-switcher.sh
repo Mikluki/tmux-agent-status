@@ -611,8 +611,8 @@ emit_close_fzf_actions() {
 # binds every typeable key, so the query cannot change there.
 PICKER_NORMAL_PROMPT='› '
 PICKER_INSERT_PROMPT='/ '
-PICKER_NORMAL_HINT='i search  m pin  p preview  x close  q quit'
-PICKER_INSERT_HINT='esc normal  C-i pin  C-p preview  C-x close'
+PICKER_NORMAL_HINT='i search  m pin  r rename  p preview  x close  q quit'
+PICKER_INSERT_HINT='esc normal  C-i pin  C-r rename  C-p preview  C-x close'
 
 # Keys that act in normal mode and type in insert mode. Every letter, digit,
 # and the common symbols, so a stray key in normal mode is a no-op rather
@@ -662,7 +662,7 @@ parse_args() {
                 configure_state_dir "$2"
                 shift 2
                 ;;
-            --rows|--list|--rows-agents|--rows-tree|--toggle-mode|--tab-action|--preview-action|--esc-action)
+            --rows|--list|--rows-agents|--rows-tree|--toggle-mode|--tab-action|--rename-action|--preview-action|--esc-action)
                 SWITCHER_COMMAND="$1"
                 shift
                 ;;
@@ -716,14 +716,27 @@ case "${SWITCHER_COMMAND:-}" in
         # ctrl-i and tab are the same byte, so one binding covers both.
         # Behaviour depends on the current mode:
         #   tree   → expand/collapse session/window then reload rows
-        #   agents → pin: abort the picker and open a tmux prompt prefilled
-        #            with the row's tag. Pinning is agents-mode only; tree
-        #            mode keeps the structural navigation it needs.
+        #   agents → pin under the derived tag, or unpin a pinned row, then
+        #            reload so the tag column shows it. The picker stays
+        #            open. Pinning is agents-mode only; tree mode keeps the
+        #            structural navigation it needs.
         if [ "$(current_mode)" = "agents" ]; then
-            printf "execute-silent(bash %q {2} {1})+abort\n" "$SCRIPT_DIR/pin-target.sh"
+            printf "execute-silent(bash %q --toggle {2})+reload(bash %q --state-dir %q --rows)\n" \
+                "$SCRIPT_DIR/pin-target.sh" "$0" "$SWITCHER_STATE_DIR"
         else
             printf "execute-silent(bash %q --state-dir %q --toggle-expand {2} {1})+reload(bash %q --state-dir %q --rows)\n" \
                 "$0" "$SWITCHER_STATE_DIR" "$0" "$SWITCHER_STATE_DIR"
+        fi
+        exit 0
+        ;;
+    --rename-action)
+        # r / ctrl-r: pin under a typed tag, or rename. The tag prompt lives on
+        # the tmux status line, which the popup covers, so abort the picker and
+        # let the prompt (opened with -b) outlive it. Agents mode only.
+        if [ "$(current_mode)" = "agents" ]; then
+            printf "execute-silent(bash %q --rename {2})+abort\n" "$SCRIPT_DIR/pin-target.sh"
+        else
+            printf 'ignore\n'
         fi
         exit 0
         ;;
@@ -904,16 +917,17 @@ ctrl_f_bind="$ctrl_p_bind"
 # Now each picker mode has its own short hint line (see PICKER_*_HINT), and
 # change-header swaps it on every mode switch.
 tab_bind="transform(bash '$0' --state-dir '$state_dir' --tab-action)"
+rename_bind="transform(bash '$0' --state-dir '$state_dir' --rename-action)"
 close_bind="transform(bash '$0' --state-dir '$state_dir' --close-fzf-actions {2} {1})"
 
 # Normal-mode letters: the actions, plus `ignore` for every other typeable
 # key so nothing reaches the query. Insert mode unbinds this whole set.
 normal_binds="j:down,k:up,i:$(picker_insert_action),/:$(picker_insert_action),q:abort"
-normal_binds+=",m:$tab_bind,p:$ctrl_p_bind,x:$close_bind"
+normal_binds+=",m:$tab_bind,r:$rename_bind,p:$ctrl_p_bind,x:$close_bind"
 IFS=, read -r -a _picker_keys <<< "$(picker_normal_keys)"
 for _key in "${_picker_keys[@]}"; do
     case "$_key" in
-        j|k|i|/|q|m|p|x) ;;
+        j|k|i|/|q|m|r|p|x) ;;
         *) normal_binds+=",$_key:ignore" ;;
     esac
 done
@@ -955,6 +969,7 @@ selected=$(emit_initial_rows | fzf \
     --bind="tab:$tab_bind" \
     --bind="ctrl-f:$ctrl_f_bind" \
     --bind="ctrl-p:$ctrl_p_bind" \
+    --bind="ctrl-r:$rename_bind" \
     --bind="ctrl-x:$close_bind" \
     --bind="esc:transform(bash '$0' --state-dir '$state_dir' --esc-action)" \
     --bind="$normal_binds" \

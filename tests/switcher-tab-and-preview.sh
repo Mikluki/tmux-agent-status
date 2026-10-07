@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # ctrl-i (the same byte as tab) branches on mode: structural expand in tree,
-# pin in agents. ctrl-p toggles the preview in both modes, under both display
+# pin toggle in agents (the picker stays open and reloads). ctrl-r renames in
+# agents and does nothing in tree. ctrl-p toggles the preview in both modes, under both display
 # methods — in a popup by relaunching it, in a window in place.
 set -euo pipefail
 
@@ -49,12 +50,22 @@ esac
 switcher --set-mode agents
 agents_action="$(switcher --tab-action)"
 case "$agents_action" in
-    *pin-target.sh*abort*) ;;
-    *) fail "agents mode should pin on ctrl-i: $agents_action" ;;
+    execute-silent\(*pin-target.sh*--toggle*\{2\}*\)+reload\(*--rows\)) ;;
+    *) fail "agents mode should toggle the pin and reload on ctrl-i: $agents_action" ;;
 esac
 case "$agents_action" in
     *--toggle-expand*) fail "agents mode should not expand: $agents_action" ;;
+    *abort*) fail "pinning should keep the picker open: $agents_action" ;;
 esac
+
+# ── ctrl-r ────────────────────────────────────────────────────────
+rename_action="$(switcher --rename-action)"
+case "$rename_action" in
+    execute-silent\(*pin-target.sh*--rename*\{2\}*\)+abort) ;;
+    *) fail "agents mode should open the rename prompt and close the picker: $rename_action" ;;
+esac
+switcher --set-mode tree
+[ "$(switcher --rename-action)" = "ignore" ] || fail "rename should do nothing in tree mode"
 
 # ── ctrl-p, window display method (in place) ──────────────────────
 grep -Fq 'ctrl_p_bind="change-preview-window($(preview_window_spec)|$(preview_window_spec),hidden)"' "$SCRIPT_FILE" \
@@ -80,6 +91,7 @@ done
 
 # ── normal-mode letters share the same actions ───────────────────
 grep -Fq 'm:$tab_bind' "$SCRIPT_FILE" || fail "m should pin through the same mode-aware action as ctrl-i"
+grep -Fq 'r:$rename_bind' "$SCRIPT_FILE" || fail "r should rename through the same action as ctrl-r"
 grep -Fq 'p:$ctrl_p_bind' "$SCRIPT_FILE" || fail "p should toggle the preview like ctrl-p"
 
 # The preview toggle aborts and the popup loop starts a fresh picker, which

@@ -156,5 +156,72 @@ run_script "$REPO_DIR/scripts/wait-target.sh" "t" "S"
 wait_prompt
 type_reply "5"
 wait_for '[ -f "$STATUS_DIR/wait/t.wait" ]' || fail "session wait should write t.wait"
+reset_waits
+
+# ── pin and rename from inside the popup picker ─────────────────────
+# The real flow, agents mode: m pins under the derived tag (or unpins) and
+# the picker stays open; r runs pin-target.sh --rename through execute-silent
+# and aborts, closing the popup. The prompt must survive the popup closing -
+# without -b it is dropped.
+if command -v fzf >/dev/null 2>&1 && command -v curl >/dev/null 2>&1; then
+    STATE_DIR="$TMP_DIR/state"
+    mkdir -p "$STATE_DIR" "$STATUS_DIR/panes"
+    # Make the pane a listed agent so the 2s reloads keep its row.
+    echo done > "$STATUS_DIR/panes/t_${pane_id}.status"
+    echo claude > "$STATUS_DIR/panes/t_${pane_id}.agent"
+    tmux set-option -gu @agent-pins
+    client=$(tmux list-clients -F '#{client_name}' | head -n 1)
+    derived=$(tmux display-message -p -t "$pane_id" '#{window_name}')
+    derived="${derived:0:3}"
+
+    open_picker() {
+        printf 'agents' > "$STATE_DIR/mode"
+        printf '1' > "$STATE_DIR/preview-hidden"
+        bash "$REPO_DIR/scripts/hook-based-switcher.sh" --state-dir "$STATE_DIR" --rows-agents > "$STATE_DIR/rows.seed"
+        grep -q "t:$pane_id" "$STATE_DIR/rows.seed" || fail "the agent pane should be listed in agents mode"
+        tmux display-popup -c "$client" -E -w 60 -h 10 \
+            "env TMUX_AGENT_SWITCHER_STATE_DIR='$STATE_DIR' '$REPO_DIR/scripts/hook-based-switcher.sh'" \
+            > /dev/null 2>&1 &
+        wait_for '[ -S "$STATE_DIR/fzf.sock" ]' || fail "the popup picker did not start"
+        sleep 0.3
+    }
+
+    picker_current() {
+        curl --silent --unix-socket "$STATE_DIR/fzf.sock" http://localhost 2>/dev/null \
+            | sed -n 's/.*"current":{[^}]*"text":"\([^"]*\)".*/\1/p'
+    }
+
+    open_picker
+    printf 'm' >&3
+    wait_for '[ "$(tmux show-option -gqv @agent-pins)" = "$derived:$pane_id:" ]' \
+        || fail "m should pin under the derived tag $derived (got '$(tmux show-option -gqv @agent-pins)')"
+    [ -S "$STATE_DIR/fzf.sock" ] || fail "the picker should stay open after m"
+    wait_for 'picker_current | grep -q "  $derived "' \
+        || fail "the reload after m should show the new tag (current: $(picker_current))"
+    printf 'm' >&3
+    wait_for '[ -z "$(tmux show-option -gqv @agent-pins)" ]' || fail "m on a pinned row should unpin it"
+    [ -S "$STATE_DIR/fzf.sock" ] || fail "the picker should stay open after unpinning"
+
+    printf 'r' >&3
+    wait_prompt
+    wait_for '[ ! -S "$STATE_DIR/fzf.sock" ]' || fail "the picker should close after r"
+    printf '\025' >&3
+    type_reply "xyz"
+    wait_for '[ "$(tmux show-option -gqv @agent-pins)" = "xyz:$pane_id:" ]' \
+        || fail "r should pin under the typed tag (got '$(tmux show-option -gqv @agent-pins)')"
+
+    # An empty reply leaves the pin alone.
+    open_picker
+    printf 'r' >&3
+    wait_prompt
+    wait_for '[ ! -S "$STATE_DIR/fzf.sock" ]' || fail "the picker should close after r"
+    printf '\025' >&3
+    type_reply ""
+    sleep 0.5
+    [ "$(tmux show-option -gqv @agent-pins)" = "xyz:$pane_id:" ] \
+        || fail "an empty rename should leave the pin alone (got '$(tmux show-option -gqv @agent-pins)')"
+else
+    echo "(popup picker check skipped: needs fzf and curl)"
+fi
 
 echo "prompt template real-tmux checks passed"

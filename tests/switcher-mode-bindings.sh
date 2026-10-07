@@ -66,14 +66,14 @@ bind_value() {
 }
 
 has_arg "--prompt=› " || fail "the picker should open in normal mode with the › prompt"
-grep -Fq -- "--header=" "$ARGS" && grep -Fq "i search  m pin  p preview  x close  q quit" "$ARGS" \
+grep -Fq -- "--header=" "$ARGS" && grep -Fq "i search  m pin  r rename  p preview  x close  q quit" "$ARGS" \
     || fail "the opening header should be the normal-mode hint"
 
 normal_line=$(grep -- '^--bind=j:down,k:up,' "$ARGS" || true)
 [ -n "$normal_line" ] || fail "normal mode should bind j/k to move"
 
 for pair in "i:unbind(" "/:unbind(" "q:abort" \
-            "m:$(bind_value tab)" "p:$(bind_value ctrl-p)" "x:$(bind_value ctrl-x)"; do
+            "m:$(bind_value tab)" "r:$(bind_value ctrl-r)" "p:$(bind_value ctrl-p)" "x:$(bind_value ctrl-x)"; do
     case "$normal_line" in
         *",$pair"*) ;;
         *) fail "normal mode should bind $pair" ;;
@@ -88,12 +88,12 @@ case "$normal_line" in
     *) fail "w should be inert in normal mode now that wait is off the picker" ;;
 esac
 case "$normal_line" in
-    *"change-prompt(/ )"*"change-header("*"esc normal  C-i pin  C-p preview  C-x close"*) ;;
+    *"change-prompt(/ )"*"change-header("*"esc normal  C-i pin  C-r rename  C-p preview  C-x close"*) ;;
     *) fail "entering insert mode should switch the prompt and header" ;;
 esac
 
 # The ctrl binds stay bound in both modes.
-for key in tab ctrl-p ctrl-f ctrl-x; do
+for key in tab ctrl-r ctrl-p ctrl-f ctrl-x; do
     [ -n "$(bind_value "$key")" ] || fail "$key should stay bound"
 done
 [ -z "$(bind_value ctrl-w)" ] || fail "ctrl-w should no longer be bound in the picker"
