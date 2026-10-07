@@ -19,7 +19,7 @@ jobs:
           tmux kill-server >/dev/null 2>&1 || true
           tmux -f /dev/null new-session -d -s agent-default 'sleep 5'
           bash tmux-agent-status.tmux
-          tmux list-keys -T prefix | grep -qE ' -T prefix +S +display-popup .*hook-based-switcher.sh'
+          tmux list-keys -T prefix | grep -qE ' -T prefix +S +run-shell .*switcher-popup-loop.sh'
           tmux list-keys -T prefix | grep -qE ' -T prefix +N +run-shell .*next-done-project.sh'
           tmux list-keys -T prefix | grep -qE ' -T prefix +W +run-shell .*wait-session.sh'
           tmux kill-server
@@ -33,7 +33,7 @@ jobs:
           tmux set-option -gq @agent-next-done-key b
           tmux set-option -gq @agent-wait-key c
           bash tmux-agent-status.tmux
-          tmux list-keys -T prefix | grep -qE ' -T prefix +a +display-popup .*hook-based-switcher.sh'
+          tmux list-keys -T prefix | grep -qE ' -T prefix +a +run-shell .*switcher-popup-loop.sh'
           tmux list-keys -T prefix | grep -qE ' -T prefix +b +run-shell .*next-done-project.sh'
           tmux list-keys -T prefix | grep -qE ' -T prefix +c +run-shell .*wait-session.sh'
           tmux kill-server
