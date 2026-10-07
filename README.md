@@ -316,7 +316,6 @@ Inside the popup switcher:
 - `Ctrl-X` closes the selected pane immediately
 - `Ctrl-X` on a window immediately closes that window and all child panes
 - `Ctrl-X` on a session immediately closes that session and all child windows and panes
-- `Ctrl-W` opens wait mode for the selected target, or cancels an existing wait
 
 In the agents view, `Ctrl-I` opens a prompt prefilled with the row's tag, or
 a tag derived from its window name when the row is unpinned: the first three
@@ -326,7 +325,7 @@ nothing unpins; a tag another agent already holds is rejected.
 
 Inside the sidebar:
 
-- `x` and `w` perform the same close and wait actions without interfering with popup search input
+- `x` closes and `w` waits on the selected row; the popup picker has no wait key, use `prefix + W`
 
 `prefix + N` follows the same top-to-bottom order as the `INBOX` section. The inbox is ordered by session name, then by tmux window order within each session.
 
@@ -369,7 +368,7 @@ set -g @agent-status-color-muted   "default"    # ·N count and dead pins
 
 The switcher popup has two views. **Tree** (default) is the hierarchical session/window/pane list; `ctrl-i` expands/collapses. **Agents** is a flat list of every agent pane (any status) sorted by priority — `ask`, `done`, `working`, `wait` — with a tag column, the age of each agent's current state, a live preview pane, and 2-second refresh. The tag column is blank for unpinned agents, so it doubles as the pin indicator. Press `ctrl-f` inside the popup to toggle between views.
 
-The picker is modal. It opens in **normal** mode (prompt `›`): `j`/`k` move, `enter` switches, `m` pins, `p` toggles the preview, `x` closes, `w` waits, and `q` or `esc` quits; other keys do nothing. `i` or `/` enters **insert** mode (prompt `/`), where typing filters the list; `esc` returns to normal mode and keeps the filter. `ctrl-i`/`tab`, `ctrl-p`/`ctrl-f`, `ctrl-x`, `ctrl-w` and `ctrl-j`/`ctrl-k` work in both modes.
+The picker is modal. It opens in **normal** mode (prompt `›`): `j`/`k` move, `enter` switches, `m` pins, `p` toggles the preview, `x` closes, and `q` or `esc` quits; other keys do nothing. `i` or `/` enters **insert** mode (prompt `/`), where typing filters the list; `esc` returns to normal mode and keeps the filter. `ctrl-i`/`tab`, `ctrl-p`/`ctrl-f`, `ctrl-x` and `ctrl-j`/`ctrl-k` work in both modes.
 
 The sidebar has the same two views, toggled with `m` from inside the sidebar pane (alongside `w`/`x` for wait/close). In **tree** mode the SESSIONS section lists every session and collapses single-agent sessions to one row; the INBOX section surfaces `done`/`ask` work. In **agents** mode the SESSIONS section is filtered to sessions/worktrees that contain agent panes and every agent pane is expanded; INBOX is suppressed because it would duplicate the same rows.
 

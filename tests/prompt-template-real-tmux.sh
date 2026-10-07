@@ -151,33 +151,6 @@ type_reply "5"
 wait_for '[ -f "$STATUS_DIR/wait/t_${pane_id}.wait" ]' || fail "window wait should cover $pane_id"
 reset_waits
 
-# ── wait from inside the popup picker ───────────────────────────────
-# The real flow: the picker runs in a display-popup, `w` (normal mode) runs
-# wait-target.sh through execute-silent and then aborts, closing the popup.
-# The prompt must survive the popup closing - without -b it is dropped.
-if command -v fzf >/dev/null 2>&1; then
-    STATE_DIR="$TMP_DIR/state"
-    mkdir -p "$STATE_DIR"
-    printf 'tree' > "$STATE_DIR/mode"
-    printf '1' > "$STATE_DIR/preview-hidden"
-    printf 'P\tt:%s\tthe-agent\n' "$pane_id" > "$STATE_DIR/rows.seed"
-    client=$(tmux list-clients -F '#{client_name}' | head -n 1)
-    tmux display-popup -c "$client" -E -w 60 -h 10 \
-        "env TMUX_AGENT_SWITCHER_STATE_DIR='$STATE_DIR' '$REPO_DIR/scripts/hook-based-switcher.sh'" \
-        > /dev/null 2>&1 &
-    wait_for '[ -S "$STATE_DIR/fzf.sock" ]' || fail "the popup picker did not start"
-    sleep 0.3
-    printf 'w' >&3
-    wait_prompt
-    wait_for '[ ! -S "$STATE_DIR/fzf.sock" ]' || fail "the picker should close after w"
-    type_reply "5"
-    wait_for '[ -f "$STATUS_DIR/wait/t_${pane_id}.wait" ]' \
-        || fail "a wait started from the popup picker should reach the handler"
-    reset_waits
-else
-    echo "(popup picker check skipped: needs fzf)"
-fi
-
 # ── wait: session target ────────────────────────────────────────────
 run_script "$REPO_DIR/scripts/wait-target.sh" "t" "S"
 wait_prompt

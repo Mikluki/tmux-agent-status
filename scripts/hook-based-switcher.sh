@@ -611,8 +611,8 @@ emit_close_fzf_actions() {
 # binds every typeable key, so the query cannot change there.
 PICKER_NORMAL_PROMPT='› '
 PICKER_INSERT_PROMPT='/ '
-PICKER_NORMAL_HINT='i search  m pin  p preview  x close  w wait  q quit'
-PICKER_INSERT_HINT='esc normal  C-i pin  C-p preview  C-x close  C-w wait'
+PICKER_NORMAL_HINT='i search  m pin  p preview  x close  q quit'
+PICKER_INSERT_HINT='esc normal  C-i pin  C-p preview  C-x close'
 
 # Keys that act in normal mode and type in insert mode. Every letter, digit,
 # and the common symbols, so a stray key in normal mode is a no-op rather
@@ -904,17 +904,16 @@ ctrl_f_bind="$ctrl_p_bind"
 # Now each picker mode has its own short hint line (see PICKER_*_HINT), and
 # change-header swaps it on every mode switch.
 tab_bind="transform(bash '$0' --state-dir '$state_dir' --tab-action)"
-wait_bind="execute-silent(bash '$SCRIPT_DIR/wait-target.sh' {2} {1})+abort"
 close_bind="transform(bash '$0' --state-dir '$state_dir' --close-fzf-actions {2} {1})"
 
 # Normal-mode letters: the actions, plus `ignore` for every other typeable
 # key so nothing reaches the query. Insert mode unbinds this whole set.
 normal_binds="j:down,k:up,i:$(picker_insert_action),/:$(picker_insert_action),q:abort"
-normal_binds+=",m:$tab_bind,p:$ctrl_p_bind,x:$close_bind,w:$wait_bind"
+normal_binds+=",m:$tab_bind,p:$ctrl_p_bind,x:$close_bind"
 IFS=, read -r -a _picker_keys <<< "$(picker_normal_keys)"
 for _key in "${_picker_keys[@]}"; do
     case "$_key" in
-        j|k|i|/|q|m|p|x|w) ;;
+        j|k|i|/|q|m|p|x) ;;
         *) normal_binds+=",$_key:ignore" ;;
     esac
 done
@@ -956,7 +955,6 @@ selected=$(emit_initial_rows | fzf \
     --bind="tab:$tab_bind" \
     --bind="ctrl-f:$ctrl_f_bind" \
     --bind="ctrl-p:$ctrl_p_bind" \
-    --bind="ctrl-w:$wait_bind" \
     --bind="ctrl-x:$close_bind" \
     --bind="esc:transform(bash '$0' --state-dir '$state_dir' --esc-action)" \
     --bind="$normal_binds" \

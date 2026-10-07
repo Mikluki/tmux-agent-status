@@ -66,15 +66,14 @@ bind_value() {
 }
 
 has_arg "--prompt=› " || fail "the picker should open in normal mode with the › prompt"
-grep -Fq -- "--header=" "$ARGS" && grep -Fq "i search  m pin  p preview  x close  w wait  q quit" "$ARGS" \
+grep -Fq -- "--header=" "$ARGS" && grep -Fq "i search  m pin  p preview  x close  q quit" "$ARGS" \
     || fail "the opening header should be the normal-mode hint"
 
 normal_line=$(grep -- '^--bind=j:down,k:up,' "$ARGS" || true)
 [ -n "$normal_line" ] || fail "normal mode should bind j/k to move"
 
 for pair in "i:unbind(" "/:unbind(" "q:abort" \
-            "m:$(bind_value tab)" "p:$(bind_value ctrl-p)" "x:$(bind_value ctrl-x)" \
-            "w:$(bind_value ctrl-w)"; do
+            "m:$(bind_value tab)" "p:$(bind_value ctrl-p)" "x:$(bind_value ctrl-x)"; do
     case "$normal_line" in
         *",$pair"*) ;;
         *) fail "normal mode should bind $pair" ;;
@@ -85,14 +84,19 @@ case "$normal_line" in
     *) fail "unused letters should be swallowed in normal mode" ;;
 esac
 case "$normal_line" in
-    *"change-prompt(/ )"*"change-header("*"esc normal  C-i pin  C-p preview  C-x close  C-w wait"*) ;;
+    *",w:ignore"*) ;;
+    *) fail "w should be inert in normal mode now that wait is off the picker" ;;
+esac
+case "$normal_line" in
+    *"change-prompt(/ )"*"change-header("*"esc normal  C-i pin  C-p preview  C-x close"*) ;;
     *) fail "entering insert mode should switch the prompt and header" ;;
 esac
 
 # The ctrl binds stay bound in both modes.
-for key in tab ctrl-p ctrl-f ctrl-x ctrl-w; do
+for key in tab ctrl-p ctrl-f ctrl-x; do
     [ -n "$(bind_value "$key")" ] || fail "$key should stay bound"
 done
+[ -z "$(bind_value ctrl-w)" ] || fail "ctrl-w should no longer be bound in the picker"
 has_arg "--bind=ctrl-j:down,ctrl-k:up" || fail "ctrl-j/k should move in both modes"
 case "$(bind_value esc)" in
     *--esc-action*) ;;
@@ -157,8 +161,9 @@ expect_screen '^› *$' "the picker should open in normal mode with an empty ›
 expect_screen 'i search  m pin' "normal mode should show the normal hint"
 expect_screen 'avocado' "the seeded rows should be listed"
 
-tmux send-keys -t t a z
-reject_screen '^› .*[az]' "letters should not type into the query in normal mode"
+tmux send-keys -t t a z w
+reject_screen '^› .*[azw]' "letters should not type into the query in normal mode"
+expect_screen 'avocado' "w should not act on the picker"
 
 tmux send-keys -t t j
 expect_screen '^▌ banana|^> banana' "j should move down in normal mode"
