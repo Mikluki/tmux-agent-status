@@ -35,7 +35,7 @@ prompt_pin() {
     # in the template, so a pane id like %12 would be rewritten into the tag.
     # Keep % out of the template: pass the bare number and let --apply put
     # the % back.
-    tmux command-prompt -p "tag:" -I "$initial" \
+    tmux command-prompt -b -p "tag:" -I "$initial" \
         "run-shell '$SCRIPT_DIR/pin-target.sh --apply \"${pane_id#%}\" \"%%\"'"
 }
 

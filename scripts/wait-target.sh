@@ -110,7 +110,7 @@ prompt_wait() {
         return 0
     fi
 
-    tmux command-prompt -p "Wait time in minutes:" \
+    tmux command-prompt -b -p "Wait time in minutes:" \
         "run-shell '$SCRIPT_DIR/wait-session-handler.sh \"$target\" %1'"
 }
 

@@ -39,7 +39,7 @@ PATH="$FAKE_BIN:$PATH" \
 HOME="$TEST_HOME" \
 bash "$REPO_DIR/scripts/wait-target.sh" "repo:%1" "P"
 
-if ! grep -Fq "command-prompt -p Wait time in minutes:" "$LOG_FILE"; then
+if ! grep -Fq "command-prompt -b -p Wait time in minutes:" "$LOG_FILE"; then
     echo "Assertion failed: wait target should open a tmux command prompt" >&2
     exit 1
 fi

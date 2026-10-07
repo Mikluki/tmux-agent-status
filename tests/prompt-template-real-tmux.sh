@@ -90,16 +90,22 @@ CLIENT_PID=$!
 exec 3> "$TMP_DIR/keys"
 wait_for '[ -n "$(tmux list-clients -F x 2>/dev/null)" ]' || fail "client never attached"
 
-# command-prompt (without -b) holds the invoking client until the prompt is
-# answered, so each script runs in the background while the reply is typed,
-# and its exit marks the prompt as dismissed. There is no format for "prompt
-# open", so the server's command log stands in for it.
-BG_PID=""
+# The scripts open their prompts with -b, so they return at once; the reply
+# is typed afterwards. There is no format for "prompt open", so the server's
+# command log stands in for it.
 prompts_seen=0
 
-run_bg() {
-    "$@" > /dev/null 2>&1 &
-    BG_PID=$!
+# A prompt opened without -b would block here; fail instead of hanging.
+run_script() {
+    if command -v timeout >/dev/null 2>&1; then
+        timeout 5 bash "$@" || true
+    else
+        bash "$@"
+    fi
+}
+
+prompt_count() {
+    tmux show-messages 2>/dev/null | grep -c 'command: command-prompt' || true
 }
 
 prompt_count() {
@@ -114,7 +120,6 @@ wait_prompt() {
 
 type_reply() {
     printf '%s\r' "$1" >&3
-    wait_for '! kill -0 "$BG_PID" 2>/dev/null' || fail "command-prompt did not close"
 }
 
 reset_waits() {
@@ -122,7 +127,7 @@ reset_waits() {
 }
 
 # ── pin: tag prompt ─────────────────────────────────────────────────
-run_bg bash "$REPO_DIR/scripts/pin-target.sh" "t:$pane_id"
+run_script "$REPO_DIR/scripts/pin-target.sh" "t:$pane_id"
 wait_prompt
 # Clear the prefilled tag, then type ours.
 printf '\025' >&3
@@ -131,7 +136,7 @@ wait_for '[ "$(tmux show-option -gqv @agent-pins)" = "abc:$pane_id:" ]' \
     || fail "pin should store abc:$pane_id: (got '$(tmux show-option -gqv @agent-pins)')"
 
 # ── wait: pane target ───────────────────────────────────────────────
-run_bg bash "$REPO_DIR/scripts/wait-target.sh" "t:$pane_id" "P"
+run_script "$REPO_DIR/scripts/wait-target.sh" "t:$pane_id" "P"
 wait_prompt
 type_reply "5"
 wait_for '[ -f "$STATUS_DIR/wait/t_${pane_id}.wait" ]' \
@@ -140,14 +145,41 @@ wait_for '[ -f "$STATUS_DIR/wait/t_${pane_id}.wait" ]' \
 reset_waits
 
 # ── wait: window target ─────────────────────────────────────────────
-run_bg bash "$REPO_DIR/scripts/wait-target.sh" "t:w$win_idx" "P"
+run_script "$REPO_DIR/scripts/wait-target.sh" "t:w$win_idx" "P"
 wait_prompt
 type_reply "5"
 wait_for '[ -f "$STATUS_DIR/wait/t_${pane_id}.wait" ]' || fail "window wait should cover $pane_id"
 reset_waits
 
+# ── wait from inside the popup picker ───────────────────────────────
+# The real flow: the picker runs in a display-popup, `w` (normal mode) runs
+# wait-target.sh through execute-silent and then aborts, closing the popup.
+# The prompt must survive the popup closing - without -b it is dropped.
+if command -v fzf >/dev/null 2>&1; then
+    STATE_DIR="$TMP_DIR/state"
+    mkdir -p "$STATE_DIR"
+    printf 'tree' > "$STATE_DIR/mode"
+    printf '1' > "$STATE_DIR/preview-hidden"
+    printf 'P\tt:%s\tthe-agent\n' "$pane_id" > "$STATE_DIR/rows.seed"
+    client=$(tmux list-clients -F '#{client_name}' | head -n 1)
+    tmux display-popup -c "$client" -E -w 60 -h 10 \
+        "env TMUX_AGENT_SWITCHER_STATE_DIR='$STATE_DIR' '$REPO_DIR/scripts/hook-based-switcher.sh'" \
+        > /dev/null 2>&1 &
+    wait_for '[ -S "$STATE_DIR/fzf.sock" ]' || fail "the popup picker did not start"
+    sleep 0.3
+    printf 'w' >&3
+    wait_prompt
+    wait_for '[ ! -S "$STATE_DIR/fzf.sock" ]' || fail "the picker should close after w"
+    type_reply "5"
+    wait_for '[ -f "$STATUS_DIR/wait/t_${pane_id}.wait" ]' \
+        || fail "a wait started from the popup picker should reach the handler"
+    reset_waits
+else
+    echo "(popup picker check skipped: needs fzf)"
+fi
+
 # ── wait: session target ────────────────────────────────────────────
-run_bg bash "$REPO_DIR/scripts/wait-target.sh" "t" "S"
+run_script "$REPO_DIR/scripts/wait-target.sh" "t" "S"
 wait_prompt
 type_reply "5"
 wait_for '[ -f "$STATUS_DIR/wait/t.wait" ]' || fail "session wait should write t.wait"
