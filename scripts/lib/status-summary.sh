@@ -15,8 +15,10 @@ source "$_STATUS_SUMMARY_LIB_DIR/pins.sh"
 #     bug  rfc✓  perf   ·6
 #
 # The trailing "·N" counts the agents you did not pin, and turns green when
-# one of them is done or asking. It is the insurance against an opt-in
-# watchlist quietly losing a finished agent.
+# one of them is asking. It is the insurance against an opt-in watchlist
+# quietly losing an agent that is blocked on you. Done does not count: it is
+# the resting state, so with many agents something unpinned is always done
+# and the counter would be green all the time.
 
 # Per-state tmux style prefix.
 agent_status_style() {

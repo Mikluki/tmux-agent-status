@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # The pin store and the ctrl-i path through pin-target.sh: pinning, renaming,
-# unpinning, rejected duplicates, and the tag derived for an unpinned row.
+# unpinning, rejected duplicates, and the free tag derived for an unpinned row.
 set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -84,6 +84,28 @@ pin_tag_valid ""      && { echo "Assertion failed: an empty tag should be reject
 assert_eq "wor" "$(pin_derive_tag "worktree-a" "api")" "an unpinned row should derive from the window name"
 assert_eq "api" "$(pin_derive_tag "" "api")" "a nameless window should fall back to the session name"
 
+# The prefill is always free: when another pane holds the base, the first
+# free of base2..base9, so Enter on the prefill pins instead of colliding.
+derive_checked() {
+    local tag
+    tag=$(pin_derive_tag "worktree-a" "api" "$1")
+    pin_tag_valid "$tag" || { echo "Assertion failed: derived tag '$tag' should be valid" >&2; exit 1; }
+    printf '%s\n' "$tag"
+}
+assert_eq "wor" "$(derive_checked "%50")" "no pins should derive the bare base"
+pin_set "%40" "wor"
+assert_eq "wor2" "$(derive_checked "%50")" "a held base should derive base2"
+pin_set "%42" "wor2"
+assert_eq "wor3" "$(derive_checked "%50")" "held base and base2 should derive base3"
+pin_set "%42" "bug"
+assert_eq "wor2" "$(derive_checked "%50")" "a freed variant should be reused"
+pin_set "%42" "wor2"
+for n in 3 4 5 6 7 8 9; do pin_set "%4$n" "wor$n"; done
+assert_eq "wor" "$(derive_checked "%50")" "with every variant held, the bare base is left to the rejection"
+assert_eq "wor" "$(derive_checked "%40")" "a pane's own pin should not count as held"
+for n in 0 2 3 4 5 6 7 8 9; do pin_remove "%4$n"; done
+assert_eq "" "$(pins_summary)" "the derivation fixtures should leave the store empty"
+
 # ── Pin, rename, unpin ────────────────────────────────────────────
 pin_set "%12" "bug"
 pin_set "%14" "rfc"
@@ -143,6 +165,25 @@ pin_set "%12" "bug"
 "$REPO_DIR/scripts/pin-target.sh" "api:%12" "P" >/dev/null 2>&1
 grep -q -- "-I bug" "$MESSAGE_LOG" || {
     echo "Assertion failed: the prompt should be prefilled with an existing tag" >&2
+    cat "$MESSAGE_LOG" >&2
+    exit 1
+}
+
+# A second agent in a window of the same name gets the next free variant.
+pin_set "%12" "wor"
+: > "$MESSAGE_LOG"
+"$REPO_DIR/scripts/pin-target.sh" "api:%14" "P" >/dev/null 2>&1
+grep -q -- "-I wor2 " "$MESSAGE_LOG" || {
+    echo "Assertion failed: the prompt should be prefilled with a free variant" >&2
+    cat "$MESSAGE_LOG" >&2
+    exit 1
+}
+
+# A pinned row still prefills its own tag, even when that tag is the base.
+: > "$MESSAGE_LOG"
+"$REPO_DIR/scripts/pin-target.sh" "api:%12" "P" >/dev/null 2>&1
+grep -q -- "-I wor " "$MESSAGE_LOG" || {
+    echo "Assertion failed: a pinned row should keep its own tag as the prefill" >&2
     cat "$MESSAGE_LOG" >&2
     exit 1
 }

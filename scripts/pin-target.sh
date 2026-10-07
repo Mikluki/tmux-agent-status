@@ -28,7 +28,7 @@ prompt_pin() {
     if [ -z "$initial" ]; then
         local window_name=""
         window_name=$(tmux display-message -p -t "$pane_id" '#{window_name}' 2>/dev/null || echo "")
-        initial=$(pin_derive_tag "$window_name" "${sel_name%%:*}")
+        initial=$(pin_derive_tag "$window_name" "${sel_name%%:*}" "$pane_id")
     fi
 
     tmux command-prompt -p "tag:" -I "$initial" \

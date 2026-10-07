@@ -292,8 +292,10 @@ glance costs nothing when nothing has changed. Age lives in the picker
 instead.
 
 The trailing `·N` counts the agents you did not pin. It is dim grey normally
-and turns green when one of them is done or asking, so an opt-in watchlist
-cannot quietly lose a finished agent.
+and turns green when one of them is asking, so an opt-in watchlist cannot
+quietly lose an agent that is blocked on you. A finished agent does not turn
+it green: done is the resting state, so with several agents something
+unpinned is nearly always done.
 
 When a pinned pane dies, its pin is dropped if the agent had finished, and
 otherwise held in dim grey until you unpin it. Pins last as long as the tmux
@@ -314,9 +316,10 @@ Inside the popup switcher:
 - `Ctrl-R` resets tracked state
 
 In the agents view, `Ctrl-I` opens a prompt prefilled with the row's tag, or
-a tag derived from its window name when the row is unpinned. Entering text
-pins or renames; entering nothing unpins; a tag another agent already holds
-is rejected.
+a tag derived from its window name when the row is unpinned: the first three
+characters, or the first free of those plus 2-9 (`wor`, `wor2`, `wor3`) when
+another agent already holds it. Entering text pins or renames; entering
+nothing unpins; a tag another agent already holds is rejected.
 
 Inside the sidebar:
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # render_status_summary: the status bar is a watchlist. Only pinned agents
 # appear, in pin order, and everything unpinned collapses into one "·N"
-# counter that turns green when one of them wants attention.
+# counter that turns green when one of them is asking.
 set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -60,12 +60,18 @@ assert_eq "#[fg=colour244]·2#[default]" \
     "$(render_status_summary "%1${tab}working" "%2${tab}wait")" \
     "unpinned agents should collapse into a dim overflow count"
 
-assert_eq "#[fg=green]·2#[default]" \
-    "$(render_status_summary "%1${tab}working" "%2${tab}done")" \
-    "the overflow count should turn green when an unpinned agent finished"
+# Done is the resting state, so a finished unpinned agent must not light the
+# counter: with many agents something unpinned is always done.
+assert_eq "#[fg=colour244]·3#[default]" \
+    "$(render_status_summary "%1${tab}done" "%2${tab}done" "%3${tab}done")" \
+    "the overflow count should stay grey when unpinned agents are only done"
 
-assert_eq "#[fg=green]·2#[default]" \
-    "$(render_status_summary "%1${tab}working" "%2${tab}ask")" \
+assert_eq "#[fg=colour244]·2#[default]" \
+    "$(render_status_summary "%1${tab}working" "%2${tab}done")" \
+    "a finished unpinned agent should not turn the overflow count green"
+
+assert_eq "#[fg=green]·3#[default]" \
+    "$(render_status_summary "%1${tab}done" "%2${tab}ask" "%3${tab}done")" \
     "the overflow count should turn green when an unpinned agent is asking"
 
 pin_set "%1" "bug"
@@ -75,7 +81,7 @@ pin_set "%3" "perf"
 watchlist="$(render_status_summary \
     "%1${tab}working" "%2${tab}done" "%3${tab}ask" "%4${tab}working" "%5${tab}done")"
 assert_eq \
-"#[fg=yellow,bold]bug#[default]  #[fg=green]rfc✓#[default]  #[fg=magenta,bold]perf?#[default]   #[fg=green]·2#[default]" \
+"#[fg=yellow,bold]bug#[default]  #[fg=green]rfc✓#[default]  #[fg=magenta,bold]perf?#[default]   #[fg=colour244]·2#[default]" \
     "$watchlist" "pinned agents should render as tags in pin order, with the rest counted"
 
 assert_eq "$watchlist" "$(render_status_summary \

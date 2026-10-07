@@ -68,16 +68,39 @@ pin_tag_valid() {
     [[ "$tag" != *[[:space:]:]* ]]
 }
 
+# pin_derive_tag <window_name> <session_name> <pane_id>
 # Tag to prefill the pin prompt with for an unpinned row: the window name
-# trimmed to three characters, falling back to the session name.
+# trimmed to three characters, falling back to the session name. If another
+# pane already holds that, the first free of base2..base9 instead, so Enter on
+# the prefill pins even when several agents share a window name. If all are
+# taken, the bare base, and pin_set's rejection reports it.
 pin_derive_tag() {
     local window_name="$1"
     local session_name="$2"
+    local pane_id="${3:-}"
     local base="$window_name"
+    local -A held=()
+    local tag pane state n
 
     [ -n "$base" ] || base="$session_name"
     base="${base//[[:space:]:]/}"
-    printf '%s\n' "${base:0:3}"
+    base="${base:0:3}"
+
+    if [ -n "$base" ]; then
+        while IFS=$'\t' read -r tag pane state; do
+            [ -n "$tag" ] && [ "$pane" != "$pane_id" ] && held[$tag]=1
+        done < <(pins_read)
+
+        if [ -n "${held[$base]:-}" ]; then
+            for n in 2 3 4 5 6 7 8 9; do
+                if [ -z "${held[$base$n]:-}" ]; then
+                    printf '%s\n' "$base$n"
+                    return 0
+                fi
+            done
+        fi
+    fi
+    printf '%s\n' "$base"
 }
 
 # pin_set <pane_id> <tag> — pin, or rename an existing pin. Fails if another
@@ -163,7 +186,7 @@ pins_render_specs() {
         [ -n "${pinned[$pane]:-}" ] && continue
         overflow=$((overflow + 1))
         case "${live_state[$pane]}" in
-            done|ask) alert=1 ;;
+            ask) alert=1 ;;
         esac
     done
 
