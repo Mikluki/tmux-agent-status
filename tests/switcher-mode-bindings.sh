@@ -66,7 +66,7 @@ bind_value() {
 }
 
 has_arg "--prompt=› " || fail "the picker should open in normal mode with the › prompt"
-grep -Fq -- "--header=" "$ARGS" && grep -Fq "i search  m pin  p preview  x close  w wait  r reset  q quit" "$ARGS" \
+grep -Fq -- "--header=" "$ARGS" && grep -Fq "i search  m pin  p preview  x close  w wait  q quit" "$ARGS" \
     || fail "the opening header should be the normal-mode hint"
 
 normal_line=$(grep -- '^--bind=j:down,k:up,' "$ARGS" || true)
@@ -74,7 +74,7 @@ normal_line=$(grep -- '^--bind=j:down,k:up,' "$ARGS" || true)
 
 for pair in "i:unbind(" "/:unbind(" "q:abort" \
             "m:$(bind_value tab)" "p:$(bind_value ctrl-p)" "x:$(bind_value ctrl-x)" \
-            "w:$(bind_value ctrl-w)" "r:$(bind_value ctrl-r)"; do
+            "w:$(bind_value ctrl-w)"; do
     case "$normal_line" in
         *",$pair"*) ;;
         *) fail "normal mode should bind $pair" ;;
@@ -90,7 +90,7 @@ case "$normal_line" in
 esac
 
 # The ctrl binds stay bound in both modes.
-for key in tab ctrl-p ctrl-f ctrl-x ctrl-w ctrl-r; do
+for key in tab ctrl-p ctrl-f ctrl-x ctrl-w; do
     [ -n "$(bind_value "$key")" ] || fail "$key should stay bound"
 done
 has_arg "--bind=ctrl-j:down,ctrl-k:up" || fail "ctrl-j/k should move in both modes"

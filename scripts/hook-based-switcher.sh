@@ -611,7 +611,7 @@ emit_close_fzf_actions() {
 # binds every typeable key, so the query cannot change there.
 PICKER_NORMAL_PROMPT='› '
 PICKER_INSERT_PROMPT='/ '
-PICKER_NORMAL_HINT='i search  m pin  p preview  x close  w wait  r reset  q quit'
+PICKER_NORMAL_HINT='i search  m pin  p preview  x close  w wait  q quit'
 PICKER_INSERT_HINT='esc normal  C-i pin  C-p preview  C-x close  C-w wait'
 
 # Keys that act in normal mode and type in insert mode. Every letter, digit,
@@ -662,7 +662,7 @@ parse_args() {
                 configure_state_dir "$2"
                 shift 2
                 ;;
-            --rows|--list|--reset|--reset-rows|--rows-agents|--rows-tree|--toggle-mode|--tab-action|--preview-action|--esc-action)
+            --rows|--list|--rows-agents|--rows-tree|--toggle-mode|--tab-action|--preview-action|--esc-action)
                 SWITCHER_COMMAND="$1"
                 shift
                 ;;
@@ -682,53 +682,6 @@ parse_args() {
                 ;;
         esac
     done
-}
-
-# ─── Full reset (shared with sidebar.sh) ──────────────────────────
-perform_full_reset() {
-    pkill -f "daemon-monitor.sh" 2>/dev/null
-    pkill -f "smart-monitor.sh" 2>/dev/null
-
-    # Clear PID files
-    find "$STATUS_DIR" -type f -name "*.pid" -delete 2>/dev/null
-
-    # Clear wait files and normalize matching wait statuses back to done
-    for wait_file in "$STATUS_DIR/wait"/*.wait; do
-        [ ! -f "$wait_file" ] && continue
-        session_name=$(basename "$wait_file" .wait)
-        [ -f "$STATUS_DIR/${session_name}.status" ] && echo "done" > "$STATUS_DIR/${session_name}.status" 2>/dev/null
-        [ -f "$STATUS_DIR/${session_name}-remote.status" ] && echo "done" > "$STATUS_DIR/${session_name}-remote.status" 2>/dev/null
-        rm -f "$wait_file" 2>/dev/null
-    done
-
-    # Clear temp files
-    rm -f "$STATUS_DIR"/.*.status.tmp 2>/dev/null
-
-    # Check each status file and only remove if no agent is running in that session
-    for status_file in "$STATUS_DIR"/*.status; do
-        [ ! -f "$status_file" ] && continue
-        session_name=$(basename "$status_file" .status)
-        [[ "$session_name" == *"-remote" ]] && continue
-
-        if [ -f "$STATUS_DIR/wait/${session_name}.wait" ]; then
-            continue
-        fi
-
-        status_value=$(cat "$status_file" 2>/dev/null)
-        if [ "$status_value" = "wait" ]; then
-            echo "done" > "$status_file" 2>/dev/null
-        fi
-
-        if ! session_has_agent_process "$session_name"; then
-            rm -f "$status_file"
-        fi
-    done
-
-    # Restart daemons
-    "$SCRIPT_DIR/../smart-monitor.sh" stop >/dev/null 2>&1
-    "$SCRIPT_DIR/../smart-monitor.sh" start >/dev/null 2>&1
-    "$SCRIPT_DIR/daemon-monitor.sh" </dev/null >/dev/null 2>&1 &
-    disown
 }
 
 # ─── Flag dispatch ────────────────────────────────────────────────
@@ -864,16 +817,6 @@ case "${SWITCHER_COMMAND:-}" in
         emit_close_fzf_actions "$SWITCHER_ARG1" "$SWITCHER_ARG2"
         exit 0
         ;;
-    --reset)
-        perform_full_reset
-        get_switcher_list
-        exit 0
-        ;;
-    --reset-rows)
-        perform_full_reset
-        emit_rows_for_mode
-        exit 0
-        ;;
 esac
 
 # ─── Main: fzf picker ────────────────────────────────────────────
@@ -908,7 +851,7 @@ else
 fi
 
 # Background poker for agents-mode live refresh. Only pokes while
-# mode=agents — in tree mode it idles (manual reload via ctrl-r).
+# mode=agents — in tree mode it idles.
 if command -v curl >/dev/null 2>&1; then
     refresh_action=$(printf 'reload(bash %q --state-dir %q --rows)' "$0" "$state_dir")
     (
@@ -962,17 +905,16 @@ ctrl_f_bind="$ctrl_p_bind"
 # change-header swaps it on every mode switch.
 tab_bind="transform(bash '$0' --state-dir '$state_dir' --tab-action)"
 wait_bind="execute-silent(bash '$SCRIPT_DIR/wait-target.sh' {2} {1})+abort"
-reset_bind="reload(bash '$0' --state-dir '$state_dir' --reset-rows)"
 close_bind="transform(bash '$0' --state-dir '$state_dir' --close-fzf-actions {2} {1})"
 
 # Normal-mode letters: the actions, plus `ignore` for every other typeable
 # key so nothing reaches the query. Insert mode unbinds this whole set.
 normal_binds="j:down,k:up,i:$(picker_insert_action),/:$(picker_insert_action),q:abort"
-normal_binds+=",m:$tab_bind,p:$ctrl_p_bind,x:$close_bind,w:$wait_bind,r:$reset_bind"
+normal_binds+=",m:$tab_bind,p:$ctrl_p_bind,x:$close_bind,w:$wait_bind"
 IFS=, read -r -a _picker_keys <<< "$(picker_normal_keys)"
 for _key in "${_picker_keys[@]}"; do
     case "$_key" in
-        j|k|i|/|q|m|p|x|w|r) ;;
+        j|k|i|/|q|m|p|x|w) ;;
         *) normal_binds+=",$_key:ignore" ;;
     esac
 done
@@ -1015,7 +957,6 @@ selected=$(emit_initial_rows | fzf \
     --bind="ctrl-f:$ctrl_f_bind" \
     --bind="ctrl-p:$ctrl_p_bind" \
     --bind="ctrl-w:$wait_bind" \
-    --bind="ctrl-r:$reset_bind" \
     --bind="ctrl-x:$close_bind" \
     --bind="esc:transform(bash '$0' --state-dir '$state_dir' --esc-action)" \
     --bind="$normal_binds" \

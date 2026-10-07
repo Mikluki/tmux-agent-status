@@ -1235,10 +1235,6 @@ while true; do
                      NEEDS_COLLECT=1
                      ;;
                 x)   action_close ;;
-                r)   "$CURRENT_DIR/hook-based-switcher.sh" --reset >/dev/null 2>&1
-                     KNOWN_AGENTS=()
-                     NEEDS_COLLECT=1
-                     ;;
                 /)   SEARCH_ACTIVE=1; SEARCH_QUERY="" ;;
                 q)   exit 0 ;;
             esac

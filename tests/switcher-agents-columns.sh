@@ -103,4 +103,11 @@ baseline_order="$(bash "$BASELINE_DIR/hook-based-switcher.sh" --state-dir "$STAT
     exit 1
 }
 
+# --rows is what every reload runs. In agents mode it must emit the agents
+# rows, never fall back to the tree's session rows.
+"$REPO_DIR/scripts/hook-based-switcher.sh" --state-dir "$STATE_DIR" --set-mode agents
+mode_rows="$("$REPO_DIR/scripts/hook-based-switcher.sh" --state-dir "$STATE_DIR" --rows)"
+[ "$mode_rows" = "$(rows)" ] || fail "--rows in agents mode should emit the agents rows"
+printf '%s\n' "$mode_rows" | grep -Fq "[session]" && fail "--rows in agents mode should not emit tree session rows"
+
 echo "switcher agents column checks passed"
