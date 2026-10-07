@@ -10,7 +10,6 @@ source "$SCRIPT_DIR/lib/session-status.sh"
 source "$SCRIPT_DIR/lib/status-summary.sh"
 
 LAST_STATUS_FILE="$STATUS_LINE_COUNTS_FILE"
-COLLECTOR_PID_FILE="$STATUS_DIR/.sidebar-collector.pid"
 
 collector_running=0
 if [ -f "$COLLECTOR_PID_FILE" ]; then

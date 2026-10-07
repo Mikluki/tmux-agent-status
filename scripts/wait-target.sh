@@ -8,12 +8,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib/session-status.sh"
 # shellcheck source=lib/selection-targets.sh
 source "$SCRIPT_DIR/lib/selection-targets.sh"
-
-force_status_dir_refresh() {
-    local tick_file="$STATUS_DIR/.wait-target-refresh.$$"
-    : > "$tick_file"
-    rm -f "$tick_file"
-}
+# shellcheck source=lib/sidebar-clients.sh
+source "$SCRIPT_DIR/lib/sidebar-clients.sh"
 
 write_session_state() {
     local session="$1"
@@ -92,7 +88,7 @@ cancel_wait() {
             ;;
     esac
 
-    force_status_dir_refresh
+    wake_collector
 }
 
 prompt_wait() {

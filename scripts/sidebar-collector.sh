@@ -11,7 +11,7 @@ source "$SCRIPT_DIR/lib/status-summary.sh"
 source "$SCRIPT_DIR/lib/sidebar-clients.sh"
 
 CACHE_FILE="$STATUS_DIR/.sidebar-cache"
-PID_FILE="$STATUS_DIR/.sidebar-collector.pid"
+PID_FILE="$COLLECTOR_PID_FILE"
 RUN_ONCE=0
 
 if [[ "${1:-}" == "--once" ]]; then
@@ -25,6 +25,11 @@ if [ -f "$PID_FILE" ]; then
         exit 0
     fi
 fi
+# wake_collector (lib/sidebar-clients.sh) signals the pid in PID_FILE to
+# collect right away. Trap it before publishing the pid: the default action
+# would kill us.
+_WAKE=0
+trap '_WAKE=1' "$COLLECTOR_WAKE_SIGNAL"
 echo $$ > "$PID_FILE"
 trap 'rm -f "$PID_FILE"' EXIT
 
@@ -93,6 +98,14 @@ tick=0
 while true; do
     tmux list-sessions >/dev/null 2>&1 || exit 0
 
+    # Woken: collect now, and drop the mtime short-circuit so collect_data
+    # rebuilds even when the change landed within the mtime's last second.
+    if (( _WAKE )); then
+        _WAKE=0
+        tick=0
+        _LAST_STATUS_MTIME=""
+    fi
+
     if (( tick == 0 )); then
         collect_data
         if (( _COLLECT_CHANGED )); then
@@ -110,6 +123,11 @@ while true; do
         signal_sidebar_clients USR2 active
     fi
 
-    sleep 0.25
+    # Interruptible sleep: a trapped signal ends the wait at once. A wake
+    # that arrived while collecting skips the sleep entirely.
+    if (( ! _WAKE )); then
+        sleep 0.25 &
+        wait $! 2>/dev/null || kill $! 2>/dev/null
+    fi
     tick=$(( (tick + 1) % 4 ))
 done

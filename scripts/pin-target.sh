@@ -21,10 +21,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib/session-status.sh"
 # shellcheck source=lib/pins.sh
 source "$SCRIPT_DIR/lib/pins.sh"
-
-force_status_dir_refresh() {
-    touch "$REFRESH_FILE" 2>/dev/null || true
-}
+# shellcheck source=lib/sidebar-clients.sh
+source "$SCRIPT_DIR/lib/sidebar-clients.sh"
 
 report() {
     tmux display-message "$1" 2>/dev/null || true
@@ -54,7 +52,7 @@ pin_checked() {
         return 0
     fi
 
-    force_status_dir_refresh
+    wake_collector
 }
 
 toggle_pin() {
@@ -65,7 +63,7 @@ toggle_pin() {
 
     if pin_tag_for "$pane_id" >/dev/null; then
         pin_remove "$pane_id"
-        force_status_dir_refresh
+        wake_collector
         return 0
     fi
 

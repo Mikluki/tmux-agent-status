@@ -6,7 +6,7 @@ source "$SCRIPT_DIR/lib/sidebar-clients.sh"
 
 case "${1:-refresh}" in
     collect)
-        touch "$REFRESH_FILE"
+        wake_collector
         ;;
     active)
         signal_sidebar_clients USR2 active

@@ -8,12 +8,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib/session-status.sh"
 # shellcheck source=lib/selection-targets.sh
 source "$SCRIPT_DIR/lib/selection-targets.sh"
-
-force_status_dir_refresh() {
-    local tick_file="$STATUS_DIR/.close-target-refresh.$$"
-    : > "$tick_file"
-    rm -f "$tick_file"
-}
+# shellcheck source=lib/sidebar-clients.sh
+source "$SCRIPT_DIR/lib/sidebar-clients.sh"
 
 cleanup_pane_state() {
     local session="$1"
@@ -184,7 +180,7 @@ apply_close() {
             ;;
     esac
 
-    force_status_dir_refresh
+    wake_collector
 }
 
 describe_selection() {
