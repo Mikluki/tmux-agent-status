@@ -107,7 +107,8 @@ baseline_order="$(bash "$BASELINE_DIR/hook-based-switcher.sh" --state-dir "$STAT
 # rows, never fall back to the tree's session rows.
 "$REPO_DIR/scripts/hook-based-switcher.sh" --state-dir "$STATE_DIR" --set-mode agents
 mode_rows="$("$REPO_DIR/scripts/hook-based-switcher.sh" --state-dir "$STATE_DIR" --rows)"
-[ "$mode_rows" = "$(rows)" ] || fail "--rows in agents mode should emit the agents rows"
+# Targets only: the age column can tick over between the two listings.
+[ "$(cut -f1,2 <<< "$mode_rows")" = "$(rows | cut -f1,2)" ] || fail "--rows in agents mode should emit the agents rows"
 printf '%s\n' "$mode_rows" | grep -Fq "[session]" && fail "--rows in agents mode should not emit tree session rows"
 
 echo "switcher agents column checks passed"
