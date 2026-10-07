@@ -2,6 +2,8 @@
 
 set -euo pipefail
 
+unset TMUX TMUX_PANE
+
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
@@ -41,8 +43,15 @@ if ! grep -Fq "command-prompt -p Wait time in minutes:" "$LOG_FILE"; then
     echo "Assertion failed: wait target should open a tmux command prompt" >&2
     exit 1
 fi
-if ! grep -Fq 'repo:%%1' "$LOG_FILE"; then
-    echo "Assertion failed: wait target should escape pane percent signs in the prompt command" >&2
+# command-prompt replaces the first %% and every %1 in the template with the
+# reply, so the pane id must reach the template without its %.
+if ! grep -Fq '"repo:1" %1' "$LOG_FILE"; then
+    echo "Assertion failed: wait target should pass the pane id without its percent sign" >&2
+    cat "$LOG_FILE" >&2
+    exit 1
+fi
+if [ "$(grep -o '%' "$LOG_FILE" | wc -l)" -ne 1 ]; then
+    echo "Assertion failed: the only percent sign in the prompt template should be the %1 reply slot" >&2
     cat "$LOG_FILE" >&2
     exit 1
 fi

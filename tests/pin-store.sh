@@ -188,4 +188,15 @@ grep -q -- "-I wor " "$MESSAGE_LOG" || {
     exit 1
 }
 
+# command-prompt replaces the first %% and every %1 in its template with the
+# reply, so the pane id goes into the template without its %.
+grep -q -- '--apply "12" "%%"' "$MESSAGE_LOG" || {
+    echo "Assertion failed: the prompt template should carry the pane id without its %" >&2
+    cat "$MESSAGE_LOG" >&2
+    exit 1
+}
+pin_remove "%12"
+apply "12" "bug"
+assert_eq "bug=%12 " "$(pins_summary)" "--apply should restore the % of a bare pane number"
+
 echo "pin store checks passed"

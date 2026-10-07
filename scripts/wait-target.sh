@@ -97,10 +97,21 @@ cancel_wait() {
 
 prompt_wait() {
     local sel_name="$1"
-    local target_template="${sel_name//%/%%}"
+    # command-prompt substitutes the reply for the first %% and for every %1
+    # in the template, so no escaping of a pane id (%12) survives it. Keep %
+    # out of the template entirely: a pane target goes over as session:12 and
+    # wait-session-handler.sh restores the %.
+    local target="$sel_name"
+    if [[ "$target" == *:%* ]]; then
+        target="${target%%:*}:${target#*:%}"
+    fi
+    if [[ "$target" == *%* ]]; then
+        tmux display-message "Cannot wait on $sel_name: % in the name" 2>/dev/null || true
+        return 0
+    fi
 
     tmux command-prompt -p "Wait time in minutes:" \
-        "run-shell '$SCRIPT_DIR/wait-session-handler.sh \"$target_template\" %1'"
+        "run-shell '$SCRIPT_DIR/wait-session-handler.sh \"$target\" %1'"
 }
 
 main() {

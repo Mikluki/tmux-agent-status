@@ -31,13 +31,20 @@ prompt_pin() {
         initial=$(pin_derive_tag "$window_name" "${sel_name%%:*}" "$pane_id")
     fi
 
+    # command-prompt substitutes the reply for the first %% and for every %1
+    # in the template, so a pane id like %12 would be rewritten into the tag.
+    # Keep % out of the template: pass the bare number and let --apply put
+    # the % back.
     tmux command-prompt -p "tag:" -I "$initial" \
-        "run-shell '$SCRIPT_DIR/pin-target.sh --apply \"$pane_id\" \"%%\"'"
+        "run-shell '$SCRIPT_DIR/pin-target.sh --apply \"${pane_id#%}\" \"%%\"'"
 }
 
 apply_pin() {
     local pane_id="$1"
     local tag="${2:-}"
+
+    # The prompt hands over the pane number without its %; restore it.
+    [[ "$pane_id" =~ ^[0-9]+$ ]] && pane_id="%$pane_id"
 
     if [ -z "$tag" ]; then
         pin_remove "$pane_id"

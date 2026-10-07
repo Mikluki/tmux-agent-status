@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 
 # Handler for wait session - called with target and wait time as arguments.
-# Target is either a session name (session-level wait) or "session:pane_id" (pane-level).
+# Target is a session name (session-level wait), "session:wN" (window-level),
+# or "session:pane_id" (pane-level; the pane id may come without its %).
 
 STATUS_DIR="$HOME/.cache/tmux-agent-status"
 WAIT_DIR="$STATUS_DIR/wait"
@@ -42,6 +43,9 @@ elif [[ "$target" == *:* ]]; then
     # Pane-level wait: "session:pane_id"
     session="${target%%:*}"
     pane_id="${target#*:}"
+    # wait-target.sh drops the % from pane ids to keep it out of the
+    # command-prompt template; restore it.
+    [[ "$pane_id" =~ ^[0-9]+$ ]] && pane_id="%$pane_id"
 
     echo "$expiry_time" > "$WAIT_DIR/${session}_${pane_id}.wait"
     sync
