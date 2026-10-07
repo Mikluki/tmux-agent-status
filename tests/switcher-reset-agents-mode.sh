@@ -102,7 +102,7 @@ PATH="$FAKE_BIN:$PATH" HOME="$TEST_HOME" \
 reset_output="$(PATH="$FAKE_BIN:$PATH" HOME="$TEST_HOME" \
     "$REPO_DIR/scripts/hook-based-switcher.sh" --state-dir "$STATE_DIR" --reset-rows)"
 
-if ! printf '%s\n' "$reset_output" | grep -Fq "agent-task:0.1 [claude]"; then
+if ! printf '%s\n' "$reset_output" | grep -Fq "P	agent-task:%1	"; then
     echo "Assertion failed: reset rows should keep agents-mode pane rows" >&2
     printf '%s\n' "$reset_output" >&2
     exit 1

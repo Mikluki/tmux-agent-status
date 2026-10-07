@@ -57,6 +57,9 @@ echo "claude"  > "$PANE_DIR/api_%12.agent"
 echo "done"    > "$PANE_DIR/api_%14.status"
 echo "ask"     > "$PANE_DIR/web_%3.status"
 echo "wait"    > "$PANE_DIR/ml_%22.status"
+# Hooks write an .agent marker for every agent pane; the agents view lists
+# only panes that actually run an agent.
+for pane in api_%14 web_%3 ml_%22; do echo "claude" > "$PANE_DIR/${pane}.agent"; done
 
 # Age comes from the status file's mtime, with no extra bookkeeping.
 touch -d "@$(( $(date +%s) - 240 ))" "$PANE_DIR/api_%12.status"
@@ -78,11 +81,11 @@ fail() {
 
 "$REPO_DIR/scripts/pin-target.sh" --apply "%12" "bug" >/dev/null 2>&1
 
-plain_rows | grep -Fq '⣾  bug   working  4m    api:1.12' \
+plain_rows | grep -Fq '⣾  bug   working  4m    api  worktree-a' \
     || fail "a pinned row should show its tag and the age of its state"
 plain_rows | grep -Fq '?        ask      ' \
     || fail "an unpinned row should leave the tag column blank"
-plain_rows | grep -Eq '⏸ +wait +[0-9]+s +ml:1\.22' \
+plain_rows | grep -Eq '⏸ +wait +[0-9]+s +ml +' \
     || fail "every agent pane should still be listed, with its age"
 
 # Order is the existing priority sort — ask, done, working, wait — and it must

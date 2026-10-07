@@ -55,7 +55,7 @@ case "$agents_action" in
 esac
 
 # ── ctrl-p, window display method (in place) ──────────────────────
-grep -Fq 'ctrl_p_bind="change-preview-window(right,65%,border-left,wrap|right,65%,border-left,wrap,hidden)"' "$SCRIPT_FILE" \
+grep -Fq 'ctrl_p_bind="change-preview-window($(preview_window_spec)|$(preview_window_spec),hidden)"' "$SCRIPT_FILE" \
     || fail "ctrl-p should toggle the preview in place under the window display method"
 grep -Fq -- '--bind="ctrl-p:$ctrl_p_bind"' "$SCRIPT_FILE" \
     || fail "ctrl-p should be bound to the preview toggle"

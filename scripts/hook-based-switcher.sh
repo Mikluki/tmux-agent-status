@@ -93,6 +93,61 @@ EXPANDED_SESSIONS_FILE=""
 EXPANDED_WINDOWS_FILE=""
 MODE_FILE=""
 
+# LOCAL PATCH (not upstream): the preview window was hardcoded as
+# "right,65%,border-left,wrap" in three places. Two problems: the 65% left the
+# list column too narrow to read a row without truncating, and side-by-side is
+# the wrong split for this content - the list is ~33 columns while agent output
+# wants the full width. Stack it instead (list on top, preview below) and read
+# both position and size from tmux.conf.
+#
+# Down-position size comes from the popup loop via TMUX_AGENT_PREVIEW_LINES,
+# because the loop is what sized the popup and so knows how many lines are
+# actually left over; @agent-switcher-preview-lines is the standalone fallback.
+PREVIEW_POS=$(tmux show-option -gqv "@agent-switcher-preview-position" 2>/dev/null)
+[ -z "$PREVIEW_POS" ] && PREVIEW_POS="down"
+
+preview_window_spec() {
+    local size border
+    if [ "$PREVIEW_POS" = "right" ]; then
+        size=$(tmux show-option -gqv "@agent-switcher-preview-width" 2>/dev/null)
+        [ -z "$size" ] && size="55%"
+        border="border-left"
+    else
+        size="${TMUX_AGENT_PREVIEW_LINES:-}"
+        [ -z "$size" ] && size=$(tmux show-option -gqv "@agent-switcher-preview-lines" 2>/dev/null)
+        [ -z "$size" ] && size=20
+        border="border-top"
+    fi
+    # nowrap: see preview_tail_lines - it is what makes "newest line is the
+    # bottom line" exact rather than approximate.
+    # noinfo: the capture is tailed to exactly the band height, so fzf's scroll
+    # counter would read "1/N" forever - pure noise in the corner.
+    printf '%s,%s,%s,nowrap,noinfo' "$PREVIEW_POS" "$size" "$border"
+}
+
+# LOCAL PATCH (not upstream): the preview showed the WRONG END of the pane.
+# `capture-pane -S -120` returns ~174 lines and fzf renders a preview from its
+# first line, so the band showed scrollback from ~150 lines ago rather than what
+# the agent is doing now - useless for a status glance. fzf cannot be told to
+# scroll to the end (a large +offset clamps with the last line at the TOP of the
+# band, showing one line over blanks), so tail the capture to the band height
+# instead. With nowrap one captured line is one row, so the newest line always
+# lands on the bottom row.
+preview_tail_lines() {
+    local n=""
+    if [ "$PREVIEW_POS" = "right" ]; then
+        # Right-hand preview is full popup height; we are running inside the
+        # popup, so the terminal knows it.
+        n=$(tput lines 2>/dev/null) || n=""
+    else
+        n="${TMUX_AGENT_PREVIEW_LINES:-}"
+        [ -z "$n" ] && n=$(tmux show-option -gqv "@agent-switcher-preview-lines" 2>/dev/null)
+    fi
+    case "$n" in ''|*[!0-9]*) n=20 ;; esac
+    [ "$n" -lt 1 ] && n=1
+    printf '%s' "$n"
+}
+
 configure_state_dir() {
     SWITCHER_STATE_DIR="$1"
     [ -n "$SWITCHER_STATE_DIR" ] || return 0
@@ -223,10 +278,17 @@ get_switcher_rows() {
     declare -A window_name=()
     declare -A window_panes=()
     declare -A pane_cmd=()
+    # LOCAL PATCH (not upstream): tracks which sessions actually contain an
+    # agent, so agent-less and dead sessions can be dropped from the tree.
+    declare -A session_has_agent=()
+    declare -A pane_pid_map=()
     local session_order=()
-    local session="" pane_id="" win_idx="" win_name="" cmd="" pane_title=""
+    local session="" pane_id="" win_idx="" win_name="" cmd="" pane_title="" pane_pid=""
 
-    while IFS=$'\t' read -r session pane_id win_idx win_name cmd pane_title; do
+    # LOCAL PATCH: build the PID map once up front (see find_pane_agent_name_var).
+    _build_agent_pid_map
+
+    while IFS=$'\t' read -r session pane_id win_idx win_name cmd pane_title pane_pid; do
         [ -z "$session" ] && continue
 
         if [ -z "${session_seen[$session]:-}" ]; then
@@ -235,6 +297,14 @@ get_switcher_rows() {
         fi
 
         [ "$pane_title" = "agent-sidebar" ] && continue
+
+        # LOCAL PATCH: flag the session if this pane runs an agent.
+        if [ -z "${session_has_agent[$session]:-}" ]; then
+            if [ -f "$PANE_DIR/${session}_${pane_id}.agent" ] \
+               || find_pane_agent_name_var "$pane_pid"; then
+                session_has_agent[$session]=1
+            fi
+        fi
 
         local window_key="${session}:${win_idx}"
         if [ -z "${window_seen[$window_key]:-}" ]; then
@@ -245,10 +315,16 @@ get_switcher_rows() {
 
         window_panes[$window_key]+="${pane_id} "
         pane_cmd[$pane_id]="$cmd"
+        pane_pid_map[$pane_id]="$pane_pid"
     done < <(tmux list-panes -a -F \
-        "#{session_name}${tab}#{pane_id}${tab}#{window_index}${tab}#{window_name}${tab}#{pane_current_command}${tab}#{pane_title}" 2>/dev/null)
+        "#{session_name}${tab}#{pane_id}${tab}#{window_index}${tab}#{window_name}${tab}#{pane_current_command}${tab}#{pane_title}${tab}#{pane_pid}" 2>/dev/null)
 
     for session in "${session_order[@]}"; do
+        # LOCAL PATCH: hide sessions with no agent in them. Upstream listed
+        # every tmux session, so long-lived agent-less ones buried the few
+        # that matter.
+        [ -n "${session_has_agent[$session]:-}" ] || continue
+
         local win_list="${session_windows[$session]:-}"
         local session_panes=()
         local window_index=""
@@ -274,8 +350,11 @@ get_switcher_rows() {
                 session_marker="▸"
             fi
         fi
-        printf 'S\t%s\t%b  %s [session] %s\n' \
-            "$session" "$session_icon" "$session_marker" "$session"
+        # LOCAL PATCH (not upstream): render the status word next to the icon,
+        # matching the agents view. Upstream showed the glyph alone, which asks
+        # you to decode colour+shape to tell done from working from waiting.
+        printf 'S\t%s\t%b  %-7s  %s [session] %s\n' \
+            "$session" "$session_icon" "$session_status" "$session_marker" "$session"
 
         session_expanded "$session" || continue
 
@@ -301,18 +380,33 @@ get_switcher_rows() {
                     window_marker="▸"
                 fi
             fi
-            printf 'P\t%s:w%s\t%b    %s [window] %s / %s\n' \
-                "$session" "$window_index" "$window_icon" "$window_marker" "$session" "${window_name[$window_key]}"
+            printf 'P\t%s:w%s\t%b  %-7s    %s [window] %s / %s\n' \
+                "$session" "$window_index" "$window_icon" "$window_status" \
+                "$window_marker" "$session" "${window_name[$window_key]}"
 
             window_expanded "$window_token" || continue
 
             for pane in "${panes[@]}"; do
                 local pane_status pane_icon badge
-                pane_status=$(get_pane_status "$session" "$pane")
-                pane_icon=$(status_icon "$pane_status")
                 badge=$(pane_agent_badge "$session" "$pane")
-                printf 'P\t%s:%s\t%b      • [pane] %s / %s : %s%b\n' \
-                    "$session" "$pane" "$pane_icon" "$session" "${window_name[$window_key]}" \
+
+                # LOCAL PATCH (not upstream): only agent panes get a status.
+                # get_pane_status() falls back to the session-wide status for
+                # panes with no status file of their own, so an editor or shell
+                # sitting beside an agent claimed to be "working" too. Show a
+                # dim dash instead - the pane stays listed and jumpable, it
+                # just no longer reports a state it doesn't have.
+                if [ -f "$PANE_DIR/${session}_${pane}.agent" ] \
+                   || find_pane_agent_name_var "${pane_pid_map[$pane]:-}"; then
+                    pane_status=$(get_pane_status "$session" "$pane")
+                    pane_icon=$(status_icon "$pane_status")
+                else
+                    pane_status="-"
+                    pane_icon=$'\033[2m·\033[0m'
+                fi
+                printf 'P\t%s:%s\t%b  %-7s      • [pane] %s / %s : %s%b\n' \
+                    "$session" "$pane" "$pane_icon" "$pane_status" \
+                    "$session" "${window_name[$window_key]}" \
                     "${pane_cmd[$pane]:-shell}" "$badge"
             done
         done
@@ -323,6 +417,44 @@ get_switcher_list() {
     get_switcher_rows | cut -f3-
 }
 
+# LOCAL PATCH (not upstream): best-effort agent name for a single pane, by
+# scanning that pane's own process subtree. Mirrors find_session_agent_name()
+# but scoped to a pane instead of a whole session.
+#
+# Deliberately sets a global instead of echoing, and walks the tree inline
+# rather than calling find_matching_descendant_pid. Both helpers memoize the
+# PID map into globals, so reaching them through $( ) puts the memo in a
+# throwaway subshell and re-runs a full `ps -e` for every pane tested. On a
+# 40-pane server that cost ~13s per listing and fzf came up empty while it ran.
+# Caller must have run _build_agent_pid_map in THIS shell first.
+_PANE_AGENT_NAME=""
+find_pane_agent_name_var() {
+    local pane_pid="$1"
+    _PANE_AGENT_NAME=""
+    [ -z "$pane_pid" ] && return 1
+
+    local queue=("$pane_pid") qi=0 cur cur_args children child
+    while (( qi < ${#queue[@]} )); do
+        cur="${queue[$qi]}"
+        ((qi++))
+        cur_args="${_AP_ARGS[$cur]:-}"
+        if [ -n "$cur_args" ] && [[ "$cur_args" =~ (^|[[:space:]/])(claude|codex|devin)([[:space:]]|$) ]]; then
+            case "$cur_args" in
+                *claude*) _PANE_AGENT_NAME="claude" ;;
+                *codex*)  _PANE_AGENT_NAME="codex" ;;
+                *devin*)  _PANE_AGENT_NAME="devin" ;;
+                *)        _PANE_AGENT_NAME="agent" ;;
+            esac
+            return 0
+        fi
+        children="${_AP_CHILDREN[$cur]:-}"
+        for child in $children; do
+            queue+=("$child")
+        done
+    done
+    return 1
+}
+
 # Flat list of every agent pane (any status), sorted by agents-mode
 # priority then by tmux list-panes order. Emits the same `P\t<session>:<pane_id>\t<display>`
 # row shape as get_switcher_rows so the existing fzf bindings continue to work.
@@ -330,15 +462,38 @@ get_switcher_list() {
 # The tag column is blank when a pane is unpinned, so it doubles as the pin
 # indicator — there is no separate marker to read.
 get_agents_rows() {
-    local tab=$'\t'
+    local tab=$'\t' us=$'\x1f'
 
-    {
-    local session pane_id win_idx win_name cmd pane_title
+    # Build the PID→children map once for this whole listing, in the same
+    # shell as the loop below so every pane test reuses it. See the note on
+    # find_pane_agent_name_var above.
+    _build_agent_pid_map
+
+    local session pane_id win_idx win_name cmd pane_title pane_pid
     local order=0
+    # LOCAL PATCH (not upstream): collect first, emit second, so the session
+    # column can be padded to the widest name actually present instead of
+    # letting each row set its own ragged width.
+    local -a collected=()
+    local max_sess=0
 
-    while IFS=$'\t' read -r session pane_id win_idx win_name cmd pane_title; do
+    while IFS=$'\t' read -r session pane_id win_idx win_name cmd pane_title pane_pid; do
         [ -z "$session" ] && continue
         [ "$pane_title" = "agent-sidebar" ] && continue
+
+        # LOCAL PATCH (not upstream): require the pane to actually run an agent.
+        # get_pane_status() falls back to the session-wide status for any pane
+        # with no .status file of its own, so upstream listed every plain shell
+        # and editor pane sharing a session with an agent as a phantom row
+        # wearing that agent's status. Trust the hook-written .agent marker
+        # first, then fall back to a per-pane process scan for agents that
+        # predate the hook install.
+        local agent=""
+        [ -f "$PANE_DIR/${session}_${pane_id}.agent" ] && agent=$(<"$PANE_DIR/${session}_${pane_id}.agent")
+        if [ -z "$agent" ] && find_pane_agent_name_var "$pane_pid"; then
+            agent="$_PANE_AGENT_NAME"
+        fi
+        [ -z "$agent" ] && continue
 
         local status
         status=$(get_pane_status "$session" "$pane_id")
@@ -347,25 +502,38 @@ get_agents_rows() {
             *) continue ;;
         esac
 
-        local pri icon agent badge="" tag age
+        local pri tag age
         pri=$(agents_mode_priority "$status")
-        icon=$(status_icon "$status")
         tag=$(pin_tag_for "$pane_id" || true)
         age=$(pane_age "$session" "$pane_id")
 
-        agent=""
-        [ -f "$PANE_DIR/${session}_${pane_id}.agent" ] && agent=$(<"$PANE_DIR/${session}_${pane_id}.agent")
-        [ -n "$agent" ] && badge=" [$agent]"
-
-        # SORTKEY \t row …  SORTKEY = pri (desc) + order (asc)
-        printf '%d\t%010d\tP\t%s:%s\t%b  %-4s  %-7s  %-4s  %s:%s.%s%s  %s\n' \
-            "$pri" "$order" \
-            "$session" "$pane_id" \
-            "$icon" "$tag" "$status" "$age" "$session" "$win_idx" "${pane_id#%}" "$badge" "$win_name"
+        # \x1f, not tab: tag and age are often empty, and read collapses
+        # runs of whitespace IFS characters, which would shift the fields.
+        collected+=("${pri}${us}${order}${us}${session}${us}${pane_id}${us}${status}${us}${tag}${us}${age}${us}${win_name}")
+        (( ${#session} > max_sess )) && max_sess=${#session}
 
         order=$((order + 1))
     done < <(tmux list-panes -a -F \
-        "#{session_name}${tab}#{pane_id}${tab}#{window_index}${tab}#{window_name}${tab}#{pane_current_command}${tab}#{pane_title}" 2>/dev/null)
+        "#{session_name}${tab}#{pane_id}${tab}#{window_index}${tab}#{window_name}${tab}#{pane_current_command}${tab}#{pane_title}${tab}#{pane_pid}" 2>/dev/null)
+
+    {
+    local rec
+    for rec in "${collected[@]}"; do
+        IFS="$us" read -r pri order session pane_id status tag age win_name <<< "$rec"
+        # LOCAL PATCH (not upstream): display is
+        # `icon  tag  status  age  session  window`. The tag is blank when the
+        # pane is unpinned, so it doubles as the pin indicator; age is time in
+        # the current state. Dropped the `[claude]` badge (every row carries
+        # it, so it separates nothing) and the `:win.pane` suffix (an
+        # fzf-invisible tmux coordinate - the real target still travels in
+        # field 2, which is what Enter uses).
+        # SORTKEY \t row …  SORTKEY = pri (desc) + order (asc)
+        printf '%d\t%010d\tP\t%s:%s\t%b  %-4s  %-7s  %-4s  %-*s  %s\n' \
+            "$pri" "$order" \
+            "$session" "$pane_id" \
+            "$(status_icon "$status")" "$tag" "$status" "$age" \
+            "$max_sess" "$session" "$win_name"
+    done
     } | sort -k1,1nr -k2,2n | cut -f3-
 }
 
@@ -558,7 +726,7 @@ case "${SWITCHER_COMMAND:-}" in
         # Used only by the in-process ctrl-f flow (window display-method).
         # Wrapped popup uses --request-relaunch instead.
         if [ "$(current_mode)" = "agents" ]; then
-            printf 'change-preview-window(right,65%%,border-left,wrap)\n'
+            printf 'change-preview-window(%s)\n' "$(preview_window_spec)"
         else
             printf 'change-preview-window(hidden)\n'
         fi
@@ -568,10 +736,33 @@ case "${SWITCHER_COMMAND:-}" in
         # Signal the popup-loop wrapper to relaunch with new dimensions.
         case "$SWITCHER_ARG1" in
             toggle-mode)
+                # LOCAL PATCH (not upstream): upstream re-derived preview
+                # visibility from the new mode - agents on, tree off. That held
+                # while agents mode always meant preview-on, but once
+                # @agent-switcher-preview-default let agents open compact, the
+                # mode toggle stopped being an involution:
+                #   agents+hidden -C-f-> tree -C-f-> agents+VISIBLE
+                # so the view you started in was unreachable and the preview
+                # picker cost two presses. Carry the agents-mode preference
+                # across instead.
+                #
+                # Tree still forces the preview off unconditionally: `tab` is
+                # expand/collapse there, so a preview switched on in tree mode
+                # would have no key to switch it back off.
+                prev_pref="$SWITCHER_STATE_DIR/preview-hidden-agents"
+                cur=1
+                [ -f "$SWITCHER_STATE_DIR/preview-hidden" ] && cur=$(<"$SWITCHER_STATE_DIR/preview-hidden")
+                [ "$(current_mode)" = "agents" ] && printf '%s' "$cur" > "$prev_pref"
+
                 toggle_mode
-                # When swapping to agents, default preview back on; tree → off.
+
                 if [ "$(current_mode)" = "agents" ]; then
-                    printf '0' > "$SWITCHER_STATE_DIR/preview-hidden"
+                    restored=""
+                    [ -f "$prev_pref" ] && restored=$(<"$prev_pref")
+                    # No remembered preference (tree-first launch): fall back to
+                    # upstream's "agents shows the preview".
+                    [ -n "$restored" ] || restored=0
+                    printf '%s' "$restored" > "$SWITCHER_STATE_DIR/preview-hidden"
                 else
                     printf '1' > "$SWITCHER_STATE_DIR/preview-hidden"
                 fi
@@ -583,6 +774,12 @@ case "${SWITCHER_COMMAND:-}" in
                     printf '0' > "$SWITCHER_STATE_DIR/preview-hidden"
                 else
                     printf '1' > "$SWITCHER_STATE_DIR/preview-hidden"
+                fi
+                # `tab` only toggles the preview in agents mode, so this IS the
+                # agents preference that a mode round-trip has to restore.
+                if [ "$(current_mode)" = "agents" ]; then
+                    cp -f "$SWITCHER_STATE_DIR/preview-hidden" \
+                          "$SWITCHER_STATE_DIR/preview-hidden-agents" 2>/dev/null || :
                 fi
                 ;;
             *)
@@ -688,27 +885,58 @@ else
     preview_hidden_flag=""
 fi
 
-# ctrl-f and ctrl-p bindings: when wrapped by popup-loop, abort + relaunch
-# with new popup geometry (a popup cannot be resized in flight); otherwise
-# toggle in-place (window display-method).
+# ctrl-p and ctrl-f bindings: preview on/off. ctrl-i (= tab) pins now, so
+# preview moved to ctrl-p, and ctrl-f stays a preview alias because that is
+# where the muscle memory points. The tree view is retired, so nothing
+# switches modes any more and the mode machinery stays pinned at whatever
+# @agent-switcher-default-mode says. When wrapped by popup-loop, abort +
+# relaunch with new popup geometry (a popup cannot be resized in flight);
+# otherwise toggle in place (window display-method).
 if [ -n "${TMUX_AGENT_SWITCHER_STATE_DIR:-}" ]; then
-    ctrl_f_bind="execute-silent(bash '$0' --state-dir '$state_dir' --request-relaunch toggle-mode)+abort"
     ctrl_p_bind="execute-silent(bash '$0' --state-dir '$state_dir' --request-relaunch toggle-preview)+abort"
 else
-    ctrl_f_bind="execute-silent(bash '$0' --state-dir '$state_dir' --toggle-mode)+reload(bash '$0' --state-dir '$state_dir' --rows)+transform(bash '$0' --state-dir '$state_dir' --preview-action)"
-    ctrl_p_bind="change-preview-window(right,65%,border-left,wrap|right,65%,border-left,wrap,hidden)"
+    ctrl_p_bind="change-preview-window($(preview_window_spec)|$(preview_window_spec),hidden)"
 fi
+ctrl_f_bind="$ctrl_p_bind"
 
-selected=$(emit_rows_for_mode | fzf \
+# LOCAL PATCH (not upstream): the key hints were one 85-column string, which
+# tmux clipped to "ctrl-w wai··" in the compact popup, and it described both
+# views at once ("tab expand/preview") so half of it was wrong either way.
+# One view left, so one honest hint line, in the C-x notation tmux.conf uses.
+header_hint='C-i pin  C-p/C-f preview  C-x close  C-w wait  C-r reset'
+
+# LOCAL PATCH (not upstream): when the popup wrapper sized the box it already
+# built the row list, so consume that instead of sweeping ps/tmux a second time
+# before fzf can draw. Single-use: deleted on read, and every reload binding
+# still goes through --rows.
+emit_initial_rows() {
+    local seed="$state_dir/rows.seed"
+    if [ -f "$seed" ]; then
+        cat "$seed"
+        rm -f "$seed"
+        return 0
+    fi
+    emit_rows_for_mode
+}
+
+# LOCAL PATCH (not upstream): this popup's geometry is computed exactly, so it
+# cannot inherit the user's interactive fzf preferences. FZF_DEFAULT_OPTS is
+# applied before argv, and a `--border` in there makes fzf draw a second frame
+# (plus a scrollbar gutter) inside tmux's popup border - 2 rows and ~3 columns
+# the size calculation knows nothing about, so the list scrolls and the header
+# clips. Drop the inherited options; every flag this picker wants is explicit.
+unset FZF_DEFAULT_OPTS FZF_DEFAULT_OPTS_FILE
+
+selected=$(emit_initial_rows | fzf \
     --ansi \
     --delimiter=$'\t' \
     --with-nth=3.. \
     --no-sort \
     --listen="$socket" \
-    --preview='id={2}; tmux capture-pane -e -p -t "${id##*:}" -S -120 2>/dev/null' \
-    --preview-window="right,65%,border-left,wrap${preview_hidden_flag}" \
-    --prompt="  " \
-    --header=$'\033[90mctrl-f mode  ctrl-i expand/pin  ctrl-p preview  ctrl-x close  ctrl-w wait  ctrl-r reset\033[0m' \
+    --preview="id={2}; tmux capture-pane -e -p -t \"\${id##*:}\" -S -120 2>/dev/null | tail -n $(preview_tail_lines)" \
+    --preview-window="$(preview_window_spec)${preview_hidden_flag}" \
+    --prompt='› ' \
+    --header=$'\033[90m'"$header_hint"$'\033[0m' \
     --header-first \
     --bind="ctrl-j:down,ctrl-k:up" \
     --bind="tab:transform(bash '$0' --state-dir '$state_dir' --tab-action)" \
@@ -720,6 +948,8 @@ selected=$(emit_rows_for_mode | fzf \
     --layout=reverse \
     --info=hidden \
     --no-separator \
+    --no-border \
+    --no-scrollbar \
     --height=100% \
     --margin=0 \
     --padding=0)

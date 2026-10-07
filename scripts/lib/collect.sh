@@ -18,6 +18,12 @@
 [[ -n "${_COLLECT_LIB_LOADED:-}" ]] && return 0
 _COLLECT_LIB_LOADED=1
 
+# Cross-cycle state for the stale-marker sweep: "session_%pane" → consecutive
+# cycles the pane has looked agent-less. Declared here rather than by the
+# caller (unlike the arrays above) because nothing outside this file reads it;
+# it only has to survive between collect_data calls in the same process.
+declare -A _AGENT_GONE_STRIKES=()
+
 # ─── PID ancestry helpers ─────────────────────────────────────────
 
 _build_pid_map() {
@@ -110,16 +116,18 @@ collect_data() {
     declare -A pane_to_id        # pane_pid → pane_id (e.g. %5)
     declare -A pane_to_window    # pane_id → window_index
     declare -A window_names      # session:window_index → window_name
+    declare -A pane_cmd          # pane_id → pane_current_command
     local all_pane_pids=""
 
     local _tab=$'\t'
-    while IFS=$'\t' read -r sname pane_id pcwd ppid win_idx win_name; do
+    while IFS=$'\t' read -r sname pane_id pcwd ppid win_idx win_name pcmd; do
         [ -z "$sname" ] && continue
 
         [[ -z "${sess_cwd[$sname]:-}" ]] && sess_cwd[$sname]="$pcwd"
         pane_to_session[$ppid]="$sname"
         pane_to_id[$ppid]="$pane_id"
         pane_to_window[$pane_id]="$win_idx"
+        pane_cmd[$pane_id]="$pcmd"
         window_names["${sname}:${win_idx}"]="$win_name"
         all_pane_pids+="$ppid "
 
@@ -157,7 +165,7 @@ collect_data() {
         sess_state[$sname]="$state"
         sess_extra[$sname]="$extra"
         sess_ssh[$sname]="$is_ssh"
-    done < <(tmux list-panes -a -F "#{session_name}${_tab}#{pane_id}${_tab}#{pane_current_path}${_tab}#{pane_pid}${_tab}#{window_index}${_tab}#{window_name}" 2>/dev/null)
+    done < <(tmux list-panes -a -F "#{session_name}${_tab}#{pane_id}${_tab}#{pane_current_path}${_tab}#{pane_pid}${_tab}#{window_index}${_tab}#{window_name}${_tab}#{pane_current_command}" 2>/dev/null)
 
     # ── 3. Worktree detection ────────────────────────────────────
     declare -A worktree_parent worktree_children
@@ -208,6 +216,11 @@ collect_data() {
         KNOWN_AGENTS["${owner}:${pid_id}"]="$agent_name"
     done
 
+    # Panes (and their sessions) with a live agent process anywhere in their
+    # subtree. Used by the stale-marker sweep at the end of this function.
+    declare -A live_agent_panes=()
+    declare -A live_agent_sessions=()
+
     # Find agent processes — scan ps globally, walk UP to find owning pane.
     # (ps instead of pgrep: macOS pgrep cannot print the command line, which
     # we need to tell claude/codex/devin apart.)
@@ -223,6 +236,8 @@ collect_data() {
             local owner="${pane_to_session[$pane_pid]:-}"
             [ -z "$owner" ] && continue
             local pid_id="${pane_to_id[$pane_pid]:-}"
+            live_agent_panes[$pid_id]=1
+            live_agent_sessions[$owner]=1
 
             # Hook-written .agent names are authoritative; process detection
             # fills gaps and never downgrades a specific name to "agent".
@@ -654,5 +669,67 @@ collect_data() {
         bname=$(basename "$paf" .agent)
         pid_id="${bname##*_}"
         [[ -z "${LIVE_PANES[$pid_id]:-}" ]] && rm -f "$paf"
+    done
+
+    # Retire markers for panes that are still alive but no longer run their
+    # agent — you quit Claude and kept the shell. Nothing else clears these:
+    # the hooks only ever write markers, and the dead-pane sweep above keys on
+    # the pane existing, not on the agent existing. Left alone the pane keeps
+    # advertising its last status forever (a phantom "done" row in the
+    # switcher, the sidebar inbox and the status line).
+    #
+    # Two conditions, both required, because the marker exists precisely to
+    # cover agents the ps scan cannot name:
+    #   - no agent process anywhere in the pane's subtree, which keeps a
+    #     merely suspended agent (still a descendant) from being retired; and
+    #   - the pane's foreground command is a plain shell. A running agent the
+    #     scan failed to recognise is still the pane's foreground process, so
+    #     this is what stops a detector gap from deleting a live marker.
+    # Two consecutive misses are needed as well, so one truncated ps sample or
+    # a pane caught mid-exec cannot retire a live agent.
+    local -A _prev_strikes=()
+    local _sk
+    for _sk in "${!_AGENT_GONE_STRIKES[@]}"; do
+        _prev_strikes[$_sk]="${_AGENT_GONE_STRIKES[$_sk]}"
+    done
+    _AGENT_GONE_STRIKES=()
+
+    local -A _retired_sessions=()
+    for paf in "$STATUS_DIR/panes/"*.agent; do
+        [ -f "$paf" ] || continue
+        local bname pid_id
+        bname=$(basename "$paf" .agent)
+        pid_id="${bname##*_}"
+        [[ -n "${LIVE_PANES[$pid_id]:-}" ]] || continue
+        [[ -n "${live_agent_panes[$pid_id]:-}" ]] && continue
+        case "${pane_cmd[$pid_id]:-}" in
+            sh|bash|zsh|fish|dash|ksh|mksh|tcsh|csh|ash) ;;
+            *) continue ;;
+        esac
+
+        local strikes=$(( ${_prev_strikes[$bname]:-0} + 1 ))
+        if (( strikes >= 2 )); then
+            rm -f "$paf" "$STATUS_DIR/panes/${bname}.status"
+            _retired_sessions["${bname%_${pid_id}}"]=1
+        else
+            _AGENT_GONE_STRIKES[$bname]=$strikes
+        fi
+    done
+
+    # Retiring the last marker in a session also retires the session-level
+    # status, which would otherwise keep the session in the sidebar inbox and
+    # the status-line counts with nothing behind it. Only sessions this sweep
+    # just touched are considered, so sessions tracked purely at session level
+    # (SSH remotes, hooks that fired without TMUX_PANE) are left alone.
+    local _rs
+    for _rs in "${!_retired_sessions[@]}"; do
+        [[ -n "${live_agent_sessions[$_rs]:-}" ]] && continue
+        [ -f "$STATUS_DIR/${_rs}-remote.status" ] && continue
+        local _still_marked=0 _mf
+        for _mf in "$STATUS_DIR/panes/${_rs}_"*.agent; do
+            [ -f "$_mf" ] && { _still_marked=1; break; }
+        done
+        (( _still_marked )) && continue
+        rm -f "$STATUS_DIR/${_rs}.status"
     done
 }
