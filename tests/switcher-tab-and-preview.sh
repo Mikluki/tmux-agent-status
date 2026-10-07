@@ -4,6 +4,8 @@
 # methods — in a popup by relaunching it, in a window in place.
 set -euo pipefail
 
+unset TMUX TMUX_PANE
+
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SCRIPT_FILE="$REPO_DIR/scripts/hook-based-switcher.sh"
 TMP_DIR="$(mktemp -d)"
@@ -75,5 +77,14 @@ for mode in tree agents; do
     switcher --request-relaunch toggle-preview
     [ "$(<"$STATE_DIR/preview-hidden")" = "1" ] || fail "ctrl-p should hide the preview again in $mode mode"
 done
+
+# ── normal-mode letters share the same actions ───────────────────
+grep -Fq 'm:$tab_bind' "$SCRIPT_FILE" || fail "m should pin through the same mode-aware action as ctrl-i"
+grep -Fq 'p:$ctrl_p_bind' "$SCRIPT_FILE" || fail "p should toggle the preview like ctrl-p"
+
+# The preview toggle aborts and the popup loop starts a fresh picker, which
+# always opens in normal mode.
+grep -Fq -- '--prompt="$PICKER_NORMAL_PROMPT"' "$SCRIPT_FILE" \
+    || fail "a relaunched picker should open in normal mode"
 
 echo "switcher tab and preview checks passed"

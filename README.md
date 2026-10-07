@@ -370,6 +370,8 @@ set -g @agent-status-color-muted   "brightblack" # ·N count and dead pins
 
 The switcher popup has two views. **Tree** (default) is the hierarchical session/window/pane list; `ctrl-i` expands/collapses. **Agents** is a flat list of every agent pane (any status) sorted by priority — `ask`, `done`, `working`, `wait` — with a tag column, the age of each agent's current state, a live preview pane, and 2-second refresh. The tag column is blank for unpinned agents, so it doubles as the pin indicator. Press `ctrl-f` inside the popup to toggle between views.
 
+The picker is modal. It opens in **normal** mode (prompt `›`): `j`/`k` move, `enter` switches, `m` pins, `p` toggles the preview, `x` closes, `w` waits, `r` resets, and `q` or `esc` quits; other keys do nothing. `i` or `/` enters **insert** mode (prompt `/`), where typing filters the list; `esc` returns to normal mode and keeps the filter. `ctrl-i`/`tab`, `ctrl-p`/`ctrl-f`, `ctrl-x`, `ctrl-w`, `ctrl-r` and `ctrl-j`/`ctrl-k` work in both modes.
+
 The sidebar has the same two views, toggled with `m` from inside the sidebar pane (alongside `w`/`x` for wait/close). In **tree** mode the SESSIONS section lists every session and collapses single-agent sessions to one row; the INBOX section surfaces `done`/`ask` work. In **agents** mode the SESSIONS section is filtered to sessions/worktrees that contain agent panes and every agent pane is expanded; INBOX is suppressed because it would duplicate the same rows.
 
 ## Notification Sounds

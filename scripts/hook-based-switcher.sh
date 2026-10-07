@@ -599,6 +599,58 @@ emit_close_fzf_actions() {
     fi
 }
 
+# ─── Picker modes (normal / insert) ──────────────────────────────
+# The picker opens in normal mode: single letters act on the selected row
+# and nothing types into the query. `i` or `/` switches to insert mode, where
+# letters type and filter; esc goes back to normal with the query (and so the
+# filtered list) kept, and esc in normal quits. The ctrl binds work in both.
+#
+# Search stays enabled in normal mode on purpose. fzf's disable-search keeps
+# the visible list only until the next reload, then shows every row again
+# under a stale query - and agents mode reloads every 2s. Normal mode instead
+# binds every typeable key, so the query cannot change there.
+PICKER_NORMAL_PROMPT='› '
+PICKER_INSERT_PROMPT='/ '
+PICKER_NORMAL_HINT='i search  m pin  p preview  x close  w wait  r reset  q quit'
+PICKER_INSERT_HINT='esc normal  C-i pin  C-p preview  C-x close  C-w wait'
+
+# Keys that act in normal mode and type in insert mode. Every letter, digit,
+# and the common symbols, so a stray key in normal mode is a no-op rather
+# than a filter.
+picker_normal_keys() {
+    local keys=() c
+    for c in {a..z} {A..Z} {0..9}; do
+        keys+=("$c")
+    done
+    keys+=(space - _ . / '?' '!' '@' '#' '$' '%' '^' '&' '*' '=' '~' '<' '>' '[' ']' '{' '}' '|' ';')
+    local IFS=,
+    printf '%s\n' "${keys[*]}"
+}
+
+picker_header() {
+    printf '\033[90m%s\033[0m' "$1"
+}
+
+picker_insert_action() {
+    printf 'unbind(%s)+change-prompt(%s)+change-header(%s)\n' \
+        "$(picker_normal_keys)" "$PICKER_INSERT_PROMPT" "$(picker_header "$PICKER_INSERT_HINT")"
+}
+
+picker_normal_action() {
+    printf 'rebind(%s)+change-prompt(%s)+change-header(%s)\n' \
+        "$(picker_normal_keys)" "$PICKER_NORMAL_PROMPT" "$(picker_header "$PICKER_NORMAL_HINT")"
+}
+
+# esc: back to normal from insert (query kept), quit from normal. fzf exports
+# the live prompt as $FZF_PROMPT to transform commands.
+picker_esc_action() {
+    if [ "${FZF_PROMPT:-}" = "$PICKER_INSERT_PROMPT" ]; then
+        picker_normal_action
+    else
+        printf 'abort\n'
+    fi
+}
+
 parse_args() {
     SWITCHER_COMMAND=""
     SWITCHER_ARG1=""
@@ -610,7 +662,7 @@ parse_args() {
                 configure_state_dir "$2"
                 shift 2
                 ;;
-            --rows|--list|--reset|--reset-rows|--rows-agents|--rows-tree|--toggle-mode|--tab-action|--preview-action)
+            --rows|--list|--reset|--reset-rows|--rows-agents|--rows-tree|--toggle-mode|--tab-action|--preview-action|--esc-action)
                 SWITCHER_COMMAND="$1"
                 shift
                 ;;
@@ -720,6 +772,10 @@ case "${SWITCHER_COMMAND:-}" in
             printf "execute-silent(bash %q --state-dir %q --toggle-expand {2} {1})+reload(bash %q --state-dir %q --rows)\n" \
                 "$0" "$SWITCHER_STATE_DIR" "$0" "$SWITCHER_STATE_DIR"
         fi
+        exit 0
+        ;;
+    --esc-action)
+        picker_esc_action
         exit 0
         ;;
     --preview-action)
@@ -902,8 +958,24 @@ ctrl_f_bind="$ctrl_p_bind"
 # LOCAL PATCH (not upstream): the key hints were one 85-column string, which
 # tmux clipped to "ctrl-w wai··" in the compact popup, and it described both
 # views at once ("tab expand/preview") so half of it was wrong either way.
-# One view left, so one honest hint line, in the C-x notation tmux.conf uses.
-header_hint='C-i pin  C-p/C-f preview  C-x close  C-w wait  C-r reset'
+# Now each picker mode has its own short hint line (see PICKER_*_HINT), and
+# change-header swaps it on every mode switch.
+tab_bind="transform(bash '$0' --state-dir '$state_dir' --tab-action)"
+wait_bind="execute-silent(bash '$SCRIPT_DIR/wait-target.sh' {2} {1})+abort"
+reset_bind="reload(bash '$0' --state-dir '$state_dir' --reset-rows)"
+close_bind="transform(bash '$0' --state-dir '$state_dir' --close-fzf-actions {2} {1})"
+
+# Normal-mode letters: the actions, plus `ignore` for every other typeable
+# key so nothing reaches the query. Insert mode unbinds this whole set.
+normal_binds="j:down,k:up,i:$(picker_insert_action),/:$(picker_insert_action),q:abort"
+normal_binds+=",m:$tab_bind,p:$ctrl_p_bind,x:$close_bind,w:$wait_bind,r:$reset_bind"
+IFS=, read -r -a _picker_keys <<< "$(picker_normal_keys)"
+for _key in "${_picker_keys[@]}"; do
+    case "$_key" in
+        j|k|i|/|q|m|p|x|w|r) ;;
+        *) normal_binds+=",$_key:ignore" ;;
+    esac
+done
 
 # LOCAL PATCH (not upstream): when the popup wrapper sized the box it already
 # built the row list, so consume that instead of sweeping ps/tmux a second time
@@ -935,16 +1007,18 @@ selected=$(emit_initial_rows | fzf \
     --listen="$socket" \
     --preview="id={2}; tmux capture-pane -e -p -t \"\${id##*:}\" -S -120 2>/dev/null | tail -n $(preview_tail_lines)" \
     --preview-window="$(preview_window_spec)${preview_hidden_flag}" \
-    --prompt='› ' \
-    --header=$'\033[90m'"$header_hint"$'\033[0m' \
+    --prompt="$PICKER_NORMAL_PROMPT" \
+    --header="$(picker_header "$PICKER_NORMAL_HINT")" \
     --header-first \
     --bind="ctrl-j:down,ctrl-k:up" \
-    --bind="tab:transform(bash '$0' --state-dir '$state_dir' --tab-action)" \
+    --bind="tab:$tab_bind" \
     --bind="ctrl-f:$ctrl_f_bind" \
     --bind="ctrl-p:$ctrl_p_bind" \
-    --bind="ctrl-w:execute-silent(bash '$SCRIPT_DIR/wait-target.sh' {2} {1})+abort" \
-    --bind="ctrl-r:reload(bash '$0' --state-dir '$state_dir' --reset-rows)" \
-    --bind="ctrl-x:transform(bash '$0' --state-dir '$state_dir' --close-fzf-actions {2} {1})" \
+    --bind="ctrl-w:$wait_bind" \
+    --bind="ctrl-r:$reset_bind" \
+    --bind="ctrl-x:$close_bind" \
+    --bind="esc:transform(bash '$0' --state-dir '$state_dir' --esc-action)" \
+    --bind="$normal_binds" \
     --layout=reverse \
     --info=hidden \
     --no-separator \
