@@ -278,11 +278,11 @@ bug  rfc✓  perf?   ·6
 
 | State | Tag |
 |-------|-----|
-| working | yellow, bare |
-| waiting | cyan, dim, bare |
-| ask | magenta, `?` |
+| working | yellow, bold, bare |
+| waiting | cyan, bare |
+| ask | magenta, bold, `?` |
 | done | green, `✓` |
-| pane gone | dim grey, bare |
+| pane gone | muted (bright black), bare |
 
 Tags are assigned when you pin (`ctrl-i` in the switcher's agents view), are
 1-4 characters, must be unique, and keep the order you pinned them in — the
@@ -291,18 +291,22 @@ Nothing on the bar varies with time: no durations and no animation, so a
 glance costs nothing when nothing has changed. Age lives in the picker
 instead.
 
-The trailing `·N` counts the agents you did not pin. It is dim grey normally
-and turns green when one of them is asking, so an opt-in watchlist cannot
-quietly lose an agent that is blocked on you. A finished agent does not turn
-it green: done is the resting state, so with several agents something
+The trailing `·N` counts the agents you did not pin. It is muted normally
+and takes the ask colour when one of them is asking, so an opt-in watchlist
+cannot quietly lose an agent that is blocked on you. A finished agent does not
+light it: done is the resting state, so with several agents something
 unpinned is nearly always done.
 
 When a pinned pane dies, its pin is dropped if the agent had finished, and
-otherwise held in dim grey until you unpin it. Pins last as long as the tmux
-server and are not written to disk: pane ids are recycled across restarts,
-and a saved pin would latch onto an unrelated pane. Colours are defined in
-[`scripts/lib/status-summary.sh`](scripts/lib/status-summary.sh) if you want
-different ones.
+otherwise held in the muted colour until you unpin it. Pins last as long as
+the tmux server and are not written to disk: pane ids are recycled across
+restarts, and a saved pin would latch onto an unrelated pane.
+
+The colours follow your theme through five options (see
+[Configuration](#configuration)). A value can be a plain colour or a tmux
+format such as `#{@base0A}`; it is expanded every time the bar is rebuilt, so
+a theme switch recolours the bar within about ten seconds. An option that is
+unset or expands to nothing uses the default.
 
 Inside the popup switcher:
 
@@ -351,6 +355,15 @@ set -g @agent-sidebar-width "42"
 # session/window/pane list (default). "agents" is a flat list of every
 # agent pane sorted by status. Toggle mid-session with ctrl-f.
 set -g @agent-switcher-default-mode "tree"  # tree | agents
+
+# Status bar colours. Plain colours or tmux formats (expanded at render time).
+set -g @agent-status-color-working "yellow"     # bold
+set -g @agent-status-color-ask     "magenta"    # bold; also the lit ·N count
+set -g @agent-status-color-done    "green"
+set -g @agent-status-color-wait    "cyan"
+set -g @agent-status-color-muted   "brightblack" # ·N count and dead pins
+# e.g. with a base16 theme that exports its palette as user options:
+# set -g @agent-status-color-working "#{@base0A}"
 ```
 
 `@agent-switcher-style "both"` is the default. It keeps the persistent sidebar and leaves `prefix + S` as the lightweight popup switcher.

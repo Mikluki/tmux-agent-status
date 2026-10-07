@@ -75,14 +75,14 @@ echo "working" > "$PANE_DIR/api_%12.status"
 echo "done"    > "$PANE_DIR/api_%14.status"
 echo "ask"     > "$PANE_DIR/api_%16.status"
 
-assert_eq "#[fg=green]·3#[default]" "$("$REPO_DIR/scripts/status-line.sh")" \
-    "with nothing pinned the bar is just the overflow count, green for the asking %16"
+assert_eq "#[fg=magenta]·3#[default]" "$("$REPO_DIR/scripts/status-line.sh")" \
+    "with nothing pinned the bar is just the overflow count, in the ask colour for the asking %16"
 
 "$REPO_DIR/scripts/pin-target.sh" --apply "%12" "bug" >/dev/null 2>&1
 "$REPO_DIR/scripts/pin-target.sh" --apply "%16" "web" >/dev/null 2>&1
 
 pinned="$("$REPO_DIR/scripts/status-line.sh")"
-assert_eq "#[fg=yellow,bold]bug#[default]  #[fg=magenta,bold]web?#[default]   #[fg=colour244]·1#[default]" \
+assert_eq "#[fg=yellow,bold]bug#[default]  #[fg=magenta,bold]web?#[default]   #[fg=brightblack]·1#[default]" \
     "$pinned" "pinned panes should render as tags in pin order, the done %14 counted dim"
 assert_eq "$pinned" "$("$REPO_DIR/scripts/status-line.sh")" \
     "the bar should be byte-identical while no agent changes state"
@@ -92,7 +92,7 @@ assert_eq "$pinned" "$("$REPO_DIR/scripts/status-line.sh")" \
 echo "done" > "$PANE_DIR/api_%16.status"
 "$REPO_DIR/scripts/status-line.sh" >/dev/null
 printf '%s\n' "%14" > "$LIVE_PANES"
-assert_eq "#[fg=colour244]bug#[default]   #[fg=colour244]·1#[default]" \
+assert_eq "#[fg=brightblack]bug#[default]   #[fg=brightblack]·1#[default]" \
     "$("$REPO_DIR/scripts/status-line.sh")" \
     "a pane that died while working should hold its tag dim, a finished one should drop"
 
