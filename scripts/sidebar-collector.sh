@@ -75,12 +75,24 @@ serialize_cache() {
     mv -f "${CACHE_FILE}.tmp" "$CACHE_FILE"
 }
 
+# The status bar re-runs status-line.sh only every status-interval.
+# refresh-client -S forces each client to re-run its #() jobs now, so a
+# changed cache shows at once instead of on the next tick.
+push_status_line() {
+    local client
+    while IFS= read -r client; do
+        [ -n "$client" ] || continue
+        tmux refresh-client -S -t "$client" >/dev/null 2>&1 || true
+    done < <(tmux list-clients -F '#{client_name}' 2>/dev/null)
+}
+
 publish_status_summary() {
-    local prev_done=""
+    local prev_done="" prev_line="" line=""
 
     if [ -f "$STATUS_LINE_COUNTS_FILE" ]; then
         IFS=: read -r _ _ prev_done _ < "$STATUS_LINE_COUNTS_FILE"
     fi
+    [ -f "$STATUS_LINE_CACHE_FILE" ] && prev_line=$(<"$STATUS_LINE_CACHE_FILE")
 
     write_status_summary_cache \
         "$SUMMARY_WORKING" \
@@ -88,6 +100,11 @@ publish_status_summary() {
         "$SUMMARY_DONE" \
         "$SUMMARY_TOTAL" \
         "${SUMMARY_AGENTS[@]}"
+
+    line=$(<"$STATUS_LINE_CACHE_FILE")
+    if (( ! RUN_ONCE )) && [ "$line" != "$prev_line" ]; then
+        push_status_line
+    fi
 
     if (( ! RUN_ONCE )) && [ -n "$prev_done" ] && [ "$SUMMARY_DONE" -gt "$prev_done" ]; then
         "$SCRIPT_DIR/play-sound.sh" &
