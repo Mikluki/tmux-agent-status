@@ -655,6 +655,7 @@ parse_args() {
     SWITCHER_COMMAND=""
     SWITCHER_ARG1=""
     SWITCHER_ARG2=""
+    SWITCHER_FOCUS=""
 
     while [ $# -gt 0 ]; do
         case "$1" in
@@ -665,6 +666,10 @@ parse_args() {
             --rows|--list|--rows-agents|--rows-tree|--toggle-mode|--tab-action|--rename-action|--preview-action|--esc-action)
                 SWITCHER_COMMAND="$1"
                 shift
+                ;;
+            --focus)
+                SWITCHER_FOCUS="${2:-}"
+                shift 2
                 ;;
             --set-mode|--request-relaunch)
                 SWITCHER_COMMAND="$1"
@@ -811,6 +816,10 @@ case "${SWITCHER_COMMAND:-}" in
                 exit 0
                 ;;
         esac
+        # The relaunched picker opens on the row the cursor was on.
+        if [ -n "$SWITCHER_FOCUS" ]; then
+            printf '%s\n' "$SWITCHER_FOCUS" > "$SWITCHER_STATE_DIR/focus"
+        fi
         touch "$SWITCHER_STATE_DIR/relaunch"
         exit 0
         ;;
@@ -865,12 +874,22 @@ fi
 
 # Background poker for agents-mode live refresh. Only pokes while
 # mode=agents — in tree mode it idles.
+#
+# The rows are built here, outside fzf, and the reload only cats the result.
+# With --track --id-nth fzf blocks input while a reload streams in, until it
+# finds the tracked row; reloading straight from --rows would hold that block
+# for the whole ps/tmux sweep (0.2-0.4s on a busy server) and drop any key
+# pressed meanwhile, every 2s.
 if command -v curl >/dev/null 2>&1; then
-    refresh_action=$(printf 'reload(bash %q --state-dir %q --rows)' "$0" "$state_dir")
+    refresh_rows="$state_dir/rows.refresh"
+    refresh_action=$(printf 'reload(cat %q)' "$refresh_rows")
     (
         while [ ! -S "$socket" ]; do sleep 0.1; done
         while [ -S "$socket" ]; do
             if [ "$(current_mode)" = "agents" ]; then
+                emit_rows_for_mode > "$refresh_rows.tmp" 2>/dev/null \
+                    && mv -f "$refresh_rows.tmp" "$refresh_rows"
+                [ -S "$socket" ] || break
                 curl --silent --unix-socket "$socket" -X POST http://localhost \
                     -d "$refresh_action" >/dev/null 2>&1 || break
             fi
@@ -905,7 +924,7 @@ fi
 # relaunch with new popup geometry (a popup cannot be resized in flight);
 # otherwise toggle in place (window display-method).
 if [ -n "${TMUX_AGENT_SWITCHER_STATE_DIR:-}" ]; then
-    ctrl_p_bind="execute-silent(bash '$0' --state-dir '$state_dir' --request-relaunch toggle-preview)+abort"
+    ctrl_p_bind="execute-silent(bash '$0' --state-dir '$state_dir' --request-relaunch toggle-preview --focus {2})+abort"
 else
     ctrl_p_bind="change-preview-window($(preview_window_spec)|$(preview_window_spec),hidden)"
 fi
@@ -934,8 +953,7 @@ done
 
 # LOCAL PATCH (not upstream): when the popup wrapper sized the box it already
 # built the row list, so consume that instead of sweeping ps/tmux a second time
-# before fzf can draw. Single-use: deleted on read, and every reload binding
-# still goes through --rows.
+# before fzf can draw. Single-use: deleted on read; reloads build their own.
 emit_initial_rows() {
     local seed="$state_dir/rows.seed"
     if [ -f "$seed" ]; then
@@ -946,6 +964,71 @@ emit_initial_rows() {
     emit_rows_for_mode
 }
 
+# ─── Start position ───────────────────────────────────────────────
+# The cursor opens on the row it was on before a relaunch (preview toggle),
+# else on the pane the picker was opened from. Both are row targets
+# (field 2): "session:%pane", "session:wN" or "session".
+#
+# The popup loop records the origin before it opens the popup: inside a
+# popup there is no TMUX_PANE, and `display -p '#{pane_id}'` resolves through
+# whichever client tmux picks. The window display method opens the picker in
+# a window of its own, so the origin is the active pane of the last window.
+start_target() {
+    local focus="$state_dir/focus" origin="$state_dir/origin" target=""
+
+    if [ -f "$focus" ]; then
+        target=$(<"$focus")
+        rm -f "$focus"
+    fi
+    [ -z "$target" ] && [ -f "$origin" ] && target=$(<"$origin")
+    if [ -z "$target" ] && [ "$OWN_STATE_DIR" = "1" ] && [ -n "${TMUX_PANE:-}" ]; then
+        target=$(tmux display-message -p -t ':{last}' '#{session_name}:#{pane_id}' 2>/dev/null || true)
+    fi
+    printf '%s\n' "$target"
+}
+
+# start_row <target> — 1-based row to open on, given the rows on stdin: the
+# target's own row; else the first row in the same window (an agent beside
+# it, or the window row in the tree); else the first in the same session;
+# else the top row.
+start_row() {
+    local target="$1"
+    local rows sess="" widx="" wid="" pane="" info="" window_panes="" n=""
+
+    rows=$(cat)
+    if [ -n "$target" ]; then
+        n=$(awk -F'\t' -v t="$target" '$2 == t { print NR; exit }' <<< "$rows")
+
+        case "$target" in
+            *:%*) pane="${target##*:}"; sess="${target%:*}" ;;
+            *:w*) sess="${target%:w*}"; widx="${target##*:w}" ;;
+            *)    sess="$target" ;;
+        esac
+
+        if [ -z "$n" ] && [ -n "$pane" ]; then
+            # A pane that has gone away keeps its session from the target.
+            info=$(tmux display-message -p -t "$pane" '#{session_name}'$'\t''#{window_index}'$'\t''#{window_id}' 2>/dev/null || true)
+            [ -n "$info" ] && IFS=$'\t' read -r sess widx wid <<< "$info"
+        fi
+
+        if [ -z "$n" ] && [ -n "$widx" ]; then
+            [ -n "$wid" ] || wid=$(tmux display-message -p -t "${sess}:${widx}" '#{window_id}' 2>/dev/null || true)
+            [ -n "$wid" ] && window_panes=$(tmux list-panes -t "$wid" -F '#{pane_id}' 2>/dev/null | tr '\n' ' ')
+            n=$(awk -F'\t' -v w="${sess}:w${widx}" -v s="${sess}:" -v panes=" $window_panes " '
+                $2 == w { print NR; exit }
+                index($2, s) == 1 {
+                    p = substr($2, length(s) + 1)
+                    if (p ~ /^%/ && index(panes, " " p " ")) { print NR; exit }
+                }' <<< "$rows")
+        fi
+
+        if [ -z "$n" ] && [ -n "$sess" ]; then
+            n=$(awk -F'\t' -v s="$sess" '$2 == s || index($2, s ":") == 1 { print NR; exit }' <<< "$rows")
+        fi
+    fi
+    printf '%s\n' "${n:-1}"
+}
+
 # LOCAL PATCH (not upstream): this popup's geometry is computed exactly, so it
 # cannot inherit the user's interactive fzf preferences. FZF_DEFAULT_OPTS is
 # applied before argv, and a `--border` in there makes fzf draw a second frame
@@ -954,7 +1037,15 @@ emit_initial_rows() {
 # clips. Drop the inherited options; every flag this picker wants is explicit.
 unset FZF_DEFAULT_OPTS FZF_DEFAULT_OPTS_FILE
 
-selected=$(emit_initial_rows | fzf \
+initial_rows=$(emit_initial_rows)
+initial_pos=$(start_row "$(start_target)" <<< "$initial_rows")
+
+# The start position applies to the first load only; after that --track
+# --id-nth=2 keeps the cursor on the same target (field 2) across the 2s
+# reloads and the reload after a pin, wherever its row moves. Tracking would
+# also hold the cursor while typing a query, so a query change goes back to
+# the top match as fzf normally does.
+selected=$(printf '%s\n' "$initial_rows" | sed '/^$/d' | fzf \
     --ansi \
     --delimiter=$'\t' \
     --with-nth=3.. \
@@ -973,6 +1064,10 @@ selected=$(emit_initial_rows | fzf \
     --bind="ctrl-x:$close_bind" \
     --bind="esc:transform(bash '$0' --state-dir '$state_dir' --esc-action)" \
     --bind="$normal_binds" \
+    --bind="load:pos($initial_pos)+unbind(load)" \
+    --bind="change:first" \
+    --track \
+    --id-nth=2 \
     --layout=reverse \
     --info=hidden \
     --no-separator \

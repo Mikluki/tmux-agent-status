@@ -376,6 +376,8 @@ The switcher popup has two views. **Tree** (default) is the hierarchical session
 
 The picker is modal. It opens in **normal** mode (prompt `›`): `j`/`k` move, `enter` switches, `m` pins or unpins, `r` renames, `p` toggles the preview, `x` closes, and `q` or `esc` quits; other keys do nothing. `i` or `/` enters **insert** mode (prompt `/`), where typing filters the list; `esc` returns to normal mode and keeps the filter. `ctrl-i`/`tab`, `ctrl-r`, `ctrl-p`/`ctrl-f`, `ctrl-x` and `ctrl-j`/`ctrl-k` work in both modes.
 
+The cursor opens on the pane you opened the picker from; if that pane is not listed, on the first agent in the same window, then the same session, then the top row. After that it follows the same agent as the list refreshes or reorders, and toggling the preview reopens on the row you were on.
+
 The sidebar has the same two views, toggled with `m` from inside the sidebar pane (alongside `w`/`x` for wait/close). In **tree** mode the SESSIONS section lists every session and collapses single-agent sessions to one row; the INBOX section surfaces `done`/`ask` work. In **agents** mode the SESSIONS section is filtered to sessions/worktrees that contain agent panes and every agent pane is expanded; INBOX is suppressed because it would duplicate the same rows.
 
 ## Notification Sounds

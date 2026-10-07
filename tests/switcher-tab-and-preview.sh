@@ -74,7 +74,7 @@ grep -Fq -- '--bind="ctrl-p:$ctrl_p_bind"' "$SCRIPT_FILE" \
     || fail "ctrl-p should be bound to the preview toggle"
 
 # ── ctrl-p, popup display method (relaunch) ───────────────────────
-grep -Fq "ctrl_p_bind=\"execute-silent(bash '\$0' --state-dir '\$state_dir' --request-relaunch toggle-preview)+abort\"" "$SCRIPT_FILE" \
+grep -Fq "ctrl_p_bind=\"execute-silent(bash '\$0' --state-dir '\$state_dir' --request-relaunch toggle-preview --focus {2})+abort\"" "$SCRIPT_FILE" \
     || fail "ctrl-p should request a popup relaunch when wrapped by the popup loop"
 
 for mode in tree agents; do
@@ -88,6 +88,11 @@ for mode in tree agents; do
     switcher --request-relaunch toggle-preview
     [ "$(<"$STATE_DIR/preview-hidden")" = "1" ] || fail "ctrl-p should hide the preview again in $mode mode"
 done
+
+# The relaunched picker reopens on the row the cursor was on.
+rm -f "$STATE_DIR/focus"
+switcher --request-relaunch toggle-preview --focus 'api:%12'
+[ "$(<"$STATE_DIR/focus")" = "api:%12" ] || fail "the preview relaunch should remember the focused row"
 
 # ── normal-mode letters share the same actions ───────────────────
 grep -Fq 'm:$tab_bind' "$SCRIPT_FILE" || fail "m should pin through the same mode-aware action as ctrl-i"

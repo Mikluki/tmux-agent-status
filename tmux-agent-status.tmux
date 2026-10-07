@@ -52,7 +52,9 @@ bind_fzf_switcher() {
             # Popup geometry varies by mode + preview state, so the popup
             # loop wrapper owns the display-popup invocation and relaunches
             # with new dimensions when the inner script requests it.
-            printf -v launch 'env TMUX_AGENT_SWITCHER_MODE=%q %q' \
+            # run-shell expands #{pane_id} as the pane the key was pressed
+            # in, which is where the picker's cursor starts.
+            printf -v launch 'env TMUX_AGENT_SWITCHER_ORIGIN=#{pane_id} TMUX_AGENT_SWITCHER_MODE=%q %q' \
                 "$switcher_default_mode" "$CURRENT_DIR/scripts/switcher-popup-loop.sh"
             tmux bind-key "$key" run-shell -b "$launch"
             ;;

@@ -14,6 +14,18 @@ INNER="$SCRIPT_DIR/hook-based-switcher.sh"
 state_dir=$(mktemp -d "${TMPDIR:-/tmp}/tmux-agent-status-switcher.XXXXXX")
 trap 'rm -rf "$state_dir"' EXIT
 
+# The pane the picker was opened from, where its cursor starts. Recorded once,
+# here, before any popup opens: inside a popup there is no TMUX_PANE, and a
+# relaunch must not re-resolve it. The key binding passes it in (run-shell
+# expands #{pane_id} in the invoking pane's context); otherwise ask tmux,
+# which run-shell resolves the same way.
+origin_pane="${TMUX_AGENT_SWITCHER_ORIGIN:-}"
+[[ "$origin_pane" =~ ^%[0-9]+$ ]] || origin_pane=$(tmux display-message -p '#{pane_id}' 2>/dev/null || true)
+if [ -n "$origin_pane" ]; then
+    tmux display-message -p -t "$origin_pane" '#{session_name}:#{pane_id}' \
+        > "$state_dir/origin" 2>/dev/null || rm -f "$state_dir/origin"
+fi
+
 initial_mode="${TMUX_AGENT_SWITCHER_MODE:-tree}"
 case "$initial_mode" in tree|agents) ;; *) initial_mode=tree ;; esac
 printf '%s' "$initial_mode" > "$state_dir/mode"
@@ -44,7 +56,7 @@ else
 fi
 
 while true; do
-    rm -f "$state_dir/relaunch" "$state_dir/rows.seed"
+    rm -f "$state_dir/relaunch" "$state_dir/rows.seed" "$state_dir/rows.refresh"
 
     mode=$(<"$state_dir/mode")
     preview_hidden=$(<"$state_dir/preview-hidden")
