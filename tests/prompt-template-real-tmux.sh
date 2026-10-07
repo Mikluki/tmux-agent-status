@@ -70,6 +70,13 @@ wait_for() {
 
 tmux -f /dev/null new-session -d -s t -x 120 -y 40 'sleep 600'
 tmux set-option -g exit-empty off
+# The command log is how we see a prompt open (below), and every poll of it
+# logs a show-messages of its own. Keep the log from rotating, or the
+# command-prompt entries fall off the end and the count goes down.
+tmux set-option -g message-limit 100000
+# Root-table key used as a barrier on the client's command queue: see
+# flush_client_queue.
+tmux bind-key -n Q set-option -g @tas-flushed 1
 
 # Burn pane ids until one contains "%1" followed by more digits: that is the
 # shape the template substitution used to corrupt (%1 -> reply).
@@ -92,7 +99,8 @@ wait_for '[ -n "$(tmux list-clients -F x 2>/dev/null)" ]' || fail "client never 
 
 # The scripts open their prompts with -b, so they return at once; the reply
 # is typed afterwards. There is no format for "prompt open", so the server's
-# command log stands in for it.
+# command log stands in for it: command-prompt sets the prompt while it runs,
+# so once it is logged, keys typed from here on reach the prompt.
 prompts_seen=0
 
 # A prompt opened without -b would block here; fail instead of hanging.
@@ -108,14 +116,19 @@ prompt_count() {
     tmux show-messages 2>/dev/null | grep -c 'command: command-prompt' || true
 }
 
-prompt_count() {
-    tmux show-messages 2>/dev/null | grep -c 'command: command-prompt' || true
-}
-
 wait_prompt() {
     wait_for '[ "$(prompt_count)" -gt "$prompts_seen" ]' || fail "command-prompt did not open"
     prompts_seen=$(prompt_count)
-    sleep 0.2
+}
+
+# Wait until every command the attached client has queued so far - a prompt
+# callback and the run-shell it starts, which blocks the queue until the
+# script exits - has finished. Key bindings queue behind them on the same
+# client queue, so the barrier key's command runs only after they are done.
+flush_client_queue() {
+    tmux set-option -gu @tas-flushed
+    printf 'Q' >&3
+    wait_for '[ "$(tmux show-option -gqv @tas-flushed)" = 1 ]' || fail "the client's command queue did not drain"
 }
 
 type_reply() {
@@ -139,23 +152,26 @@ wait_for '[ "$(tmux show-option -gqv @agent-pins)" = "abc:$pane_id:" ]' \
 run_script "$REPO_DIR/scripts/wait-target.sh" "t:$pane_id" "P"
 wait_prompt
 type_reply "5"
-wait_for '[ -f "$STATUS_DIR/wait/t_${pane_id}.wait" ]' \
+flush_client_queue
+[ -f "$STATUS_DIR/wait/t_${pane_id}.wait" ] \
     || fail "pane wait should write t_${pane_id}.wait (have: $(ls "$STATUS_DIR/wait" 2>/dev/null | tr '\n' ' '))"
-[ "$(cat "$STATUS_DIR/panes/t_${pane_id}.status")" = "wait" ] || fail "pane status should be wait"
+[ "$(cat "$STATUS_DIR/panes/t_${pane_id}.status" 2>/dev/null)" = "wait" ] || fail "pane status should be wait"
 reset_waits
 
 # ── wait: window target ─────────────────────────────────────────────
 run_script "$REPO_DIR/scripts/wait-target.sh" "t:w$win_idx" "P"
 wait_prompt
 type_reply "5"
-wait_for '[ -f "$STATUS_DIR/wait/t_${pane_id}.wait" ]' || fail "window wait should cover $pane_id"
+flush_client_queue
+[ -f "$STATUS_DIR/wait/t_${pane_id}.wait" ] || fail "window wait should cover $pane_id"
 reset_waits
 
 # ── wait: session target ────────────────────────────────────────────
 run_script "$REPO_DIR/scripts/wait-target.sh" "t" "S"
 wait_prompt
 type_reply "5"
-wait_for '[ -f "$STATUS_DIR/wait/t.wait" ]' || fail "session wait should write t.wait"
+flush_client_queue
+[ -f "$STATUS_DIR/wait/t.wait" ] || fail "session wait should write t.wait"
 reset_waits
 
 # ── pin and rename from inside the popup picker ─────────────────────
@@ -178,17 +194,49 @@ if command -v fzf >/dev/null 2>&1 && command -v curl >/dev/null 2>&1; then
         printf 'agents' > "$STATE_DIR/mode"
         printf '1' > "$STATE_DIR/preview-hidden"
         bash "$REPO_DIR/scripts/hook-based-switcher.sh" --state-dir "$STATE_DIR" --rows-agents > "$STATE_DIR/rows.seed"
+        rm -f "$STATE_DIR/rows.refresh"
         grep -q "t:$pane_id" "$STATE_DIR/rows.seed" || fail "the agent pane should be listed in agents mode"
         tmux display-popup -c "$client" -E -w 60 -h 10 \
             "env TMUX_AGENT_SWITCHER_STATE_DIR='$STATE_DIR' '$REPO_DIR/scripts/hook-based-switcher.sh'" \
             > /dev/null 2>&1 &
         wait_for '[ -S "$STATE_DIR/fzf.sock" ]' || fail "the popup picker did not start"
-        sleep 0.3
+        # The socket comes up before the rows load, and the agents-mode
+        # refresher reloads once right away. A key pressed while a reload
+        # streams in is dropped (--track blocks input until it finds the
+        # tracked row), so wait for that first reload's rows to be built and
+        # for fzf to sit idle on a row.
+        wait_for '[ -f "$STATE_DIR/rows.refresh" ]' || fail "the picker's refresher never ran"
+        wait_picker_idle
+    }
+
+    picker_state() {
+        curl --silent --unix-socket "$STATE_DIR/fzf.sock" http://localhost 2>/dev/null
     }
 
     picker_current() {
-        curl --silent --unix-socket "$STATE_DIR/fzf.sock" http://localhost 2>/dev/null \
-            | sed -n 's/.*"current":{[^}]*"text":"\([^"]*\)".*/\1/p'
+        picker_state | sed -n 's/.*"current":{[^}]*"text":"\([^"]*\)".*/\1/p'
+    }
+
+    # Idle: not reading a reload, and on a row whose text matches $1 (any
+    # row when omitted, or "!pattern" for a row that does not match).
+    picker_idle_on() {
+        local state current
+        state=$(picker_state)
+        [[ "$state" == *'"reading":false'* ]] || return 1
+        current=$(sed -n 's/.*"current":{[^}]*"text":"\([^"]*\)".*/\1/p' <<< "$state")
+        [ -n "$current" ] || return 1
+        case "${1:-}" in
+            "") return 0 ;;
+            !*) [[ "$current" != *"${1#!}"* ]] ;;
+            *) [[ "$current" == *"$1"* ]] ;;
+        esac
+    }
+
+    wait_picker_idle() {
+        # wait_for evals in its own frame, where $1 is the expression.
+        idle_want="${1:-}"
+        wait_for 'picker_idle_on "$idle_want"' \
+            || fail "the picker did not settle on a row${1:+ matching $1} (current: $(picker_current))"
     }
 
     open_picker
@@ -196,11 +244,12 @@ if command -v fzf >/dev/null 2>&1 && command -v curl >/dev/null 2>&1; then
     wait_for '[ "$(tmux show-option -gqv @agent-pins)" = "$derived:$pane_id:" ]' \
         || fail "m should pin under the derived tag $derived (got '$(tmux show-option -gqv @agent-pins)')"
     [ -S "$STATE_DIR/fzf.sock" ] || fail "the picker should stay open after m"
-    wait_for 'picker_current | grep -q "  $derived "' \
-        || fail "the reload after m should show the new tag (current: $(picker_current))"
+    # The reload after m must land before the next key, or fzf drops it.
+    wait_picker_idle "  $derived "
     printf 'm' >&3
     wait_for '[ -z "$(tmux show-option -gqv @agent-pins)" ]' || fail "m on a pinned row should unpin it"
     [ -S "$STATE_DIR/fzf.sock" ] || fail "the picker should stay open after unpinning"
+    wait_picker_idle "!  $derived "
 
     printf 'r' >&3
     wait_prompt
@@ -217,7 +266,7 @@ if command -v fzf >/dev/null 2>&1 && command -v curl >/dev/null 2>&1; then
     wait_for '[ ! -S "$STATE_DIR/fzf.sock" ]' || fail "the picker should close after r"
     printf '\025' >&3
     type_reply ""
-    sleep 0.5
+    flush_client_queue
     [ "$(tmux show-option -gqv @agent-pins)" = "xyz:$pane_id:" ] \
         || fail "an empty rename should leave the pin alone (got '$(tmux show-option -gqv @agent-pins)')"
 else
