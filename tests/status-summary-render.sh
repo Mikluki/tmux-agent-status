@@ -64,17 +64,17 @@ assert_eq() {
 
 assert_eq "" "$(render_status_summary)" "no agents should render an empty summary"
 
-assert_eq "#[fg=brightblack]·2#[default]" \
+assert_eq "#[fg=default]·2#[default]" \
     "$(render_status_summary "%1${tab}working" "%2${tab}wait")" \
     "unpinned agents should collapse into a dim overflow count"
 
 # Done is the resting state, so a finished unpinned agent must not light the
 # counter: with many agents something unpinned is always done.
-assert_eq "#[fg=brightblack]·3#[default]" \
+assert_eq "#[fg=default]·3#[default]" \
     "$(render_status_summary "%1${tab}done" "%2${tab}done" "%3${tab}done")" \
     "the overflow count should stay grey when unpinned agents are only done"
 
-assert_eq "#[fg=brightblack]·2#[default]" \
+assert_eq "#[fg=default]·2#[default]" \
     "$(render_status_summary "%1${tab}working" "%2${tab}done")" \
     "a finished unpinned agent should not light the overflow count"
 
@@ -89,7 +89,7 @@ pin_set "%3" "perf"
 watchlist="$(render_status_summary \
     "%1${tab}working" "%2${tab}done" "%3${tab}ask" "%4${tab}working" "%5${tab}done")"
 assert_eq \
-"#[fg=yellow,bold]bug#[default]  #[fg=green]rfc✓#[default]  #[fg=magenta,bold]perf?#[default]   #[fg=brightblack]·2#[default]" \
+"#[fg=yellow,bold]bug#[default]  #[fg=green]rfc✓#[default]  #[fg=magenta,bold]perf?#[default]   #[fg=default]·2#[default]" \
     "$watchlist" "pinned agents should render as tags in pin order, with the rest counted"
 
 assert_eq "$watchlist" "$(render_status_summary \
@@ -100,7 +100,7 @@ assert_eq "$watchlist" "$(render_status_summary \
 # vanished so its pin goes with it, while %3 was still asking, so its tag is
 # held in dim grey until it is unpinned by hand.
 assert_eq \
-"#[fg=cyan]bug#[default]  #[fg=brightblack]perf#[default]" \
+"#[fg=cyan]bug#[default]  #[fg=default]perf#[default]" \
     "$(render_status_summary "%1${tab}wait")" \
     "a dead pin should be dropped when it finished and held dim otherwise"
 
@@ -111,7 +111,7 @@ assert_eq "bug	perf" "$(pins_read | cut -f1 | paste -sd '\t' -)" \
 # sits is part of how it is read.
 pin_set "%9" "zzz"
 assert_eq \
-"#[fg=cyan]bug#[default]  #[fg=brightblack]perf#[default]  #[fg=yellow,bold]zzz#[default]" \
+"#[fg=cyan]bug#[default]  #[fg=default]perf#[default]  #[fg=yellow,bold]zzz#[default]" \
     "$(render_status_summary "%1${tab}wait" "%9${tab}working")" \
     "a newly pinned agent should append rather than re-sort the watchlist"
 
@@ -133,7 +133,7 @@ assert_eq \
 
 printf '%s\n' '|colour9||colour3|' > "$TMUX_FAKE_COLORS"
 assert_eq \
-"#[fg=yellow,bold]aa#[default]  #[fg=colour9,bold]bb?#[default]  #[fg=green]cc✓#[default]  #[fg=colour3]dd#[default]  #[fg=brightblack]ee#[default]   #[fg=brightblack]·1#[default]" \
+"#[fg=yellow,bold]aa#[default]  #[fg=colour9,bold]bb?#[default]  #[fg=green]cc✓#[default]  #[fg=colour3]dd#[default]  #[fg=default]ee#[default]   #[fg=default]·1#[default]" \
     "$(render_status_summary "%1${tab}working" "%2${tab}ask" "%3${tab}done" "%4${tab}wait" "%6${tab}working")" \
     "colours that expand to nothing should fall back to the defaults"
 rm -f "$TMUX_FAKE_COLORS"

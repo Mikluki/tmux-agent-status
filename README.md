@@ -361,7 +361,7 @@ set -g @agent-status-color-working "yellow"     # bold
 set -g @agent-status-color-ask     "magenta"    # bold; also the lit ·N count
 set -g @agent-status-color-done    "green"
 set -g @agent-status-color-wait    "cyan"
-set -g @agent-status-color-muted   "brightblack" # ·N count and dead pins
+set -g @agent-status-color-muted   "default"    # ·N count and dead pins
 # e.g. with a base16 theme that exports its palette as user options:
 # set -g @agent-status-color-working "#{@base0A}"
 ```

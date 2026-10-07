@@ -49,7 +49,6 @@ apply_pin() {
     if [ -z "$tag" ]; then
         pin_remove "$pane_id"
         force_status_dir_refresh
-        tmux display-message "Unpinned $pane_id" 2>/dev/null || true
         return 0
     fi
 
@@ -64,7 +63,6 @@ apply_pin() {
     fi
 
     force_status_dir_refresh
-    tmux display-message "Pinned $pane_id as $tag" 2>/dev/null || true
 }
 
 case "${1:-}" in
