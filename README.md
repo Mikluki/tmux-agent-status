@@ -368,6 +368,11 @@ set -g @agent-status-color-wait    "cyan"
 set -g @agent-status-color-muted   "default"    # ·N count and dead pins
 # e.g. with a base16 theme that exports its palette as user options:
 # set -g @agent-status-color-working "#{@base0A}"
+
+# Picker selection colours: a raw fzf --color spec (empty = fzf defaults).
+# tmux formats in it are expanded each time the picker opens.
+set -g @agent-switcher-colors ""
+# e.g. set -g @agent-switcher-colors 'bg+:#{@base02},fg+:#{@base05}:bold,pointer:#{@base0A},gutter:-1'
 ```
 
 `@agent-switcher-style "both"` is the default. It keeps the persistent sidebar and leaves `prefix + S` as the lightweight popup switcher.
@@ -376,7 +381,7 @@ The switcher popup has two views. **Tree** (default) is the hierarchical session
 
 The picker is modal. It opens in **normal** mode (prompt `›`): `j`/`k` move, `enter` switches, `m` pins or unpins, `r` renames, `p` toggles the preview, `x` closes, and `q` or `esc` quits; other keys do nothing. `i` or `/` enters **insert** mode (prompt `/`), where typing filters the list; `esc` returns to normal mode and keeps the filter. `ctrl-i`/`tab`, `ctrl-r`, `ctrl-p`/`ctrl-f`, `ctrl-x` and `ctrl-j`/`ctrl-k` work in both modes.
 
-The cursor opens on the pane you opened the picker from; if that pane is not listed, on the first agent in the same window, then the same session, then the top row. After that it follows the same agent as the list refreshes or reorders, and toggling the preview reopens on the row you were on.
+The cursor opens on the pane you opened the picker from; if that pane is not listed, on the first agent in the same window, then the same session, then the top row. After that it follows the same agent as the list refreshes or reorders, and toggling the preview reopens on the row you were on. The selected row is highlighted across its full width; its colours come from `@agent-switcher-colors` (see [Configuration](#configuration)).
 
 The sidebar has the same two views, toggled with `m` from inside the sidebar pane (alongside `w`/`x` for wait/close). In **tree** mode the SESSIONS section lists every session and collapses single-agent sessions to one row; the INBOX section surfaces `done`/`ask` work. In **agents** mode the SESSIONS section is filtered to sessions/worktrees that contain agent panes and every agent pane is expanded; INBOX is suppressed because it would duplicate the same rows.
 

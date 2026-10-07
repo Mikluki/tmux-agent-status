@@ -66,6 +66,8 @@ bind_value() {
 }
 
 has_arg "--prompt=› " || fail "the picker should open in normal mode with the › prompt"
+has_arg "--highlight-line" || fail "the selected row should be highlighted across its full width"
+grep -q -- '^--color' "$ARGS" && fail "an unset @agent-switcher-colors should add no --color"
 grep -Fq -- "--header=" "$ARGS" && grep -Fq "i search  m pin  r rename  p preview  x close  q quit" "$ARGS" \
     || fail "the opening header should be the normal-mode hint"
 
@@ -115,6 +117,19 @@ esac
 [ "$(FZF_PROMPT='› ' bash "$SCRIPT_FILE" --esc-action)" = "abort" ] \
     || fail "esc in normal mode should quit"
 
+# @agent-switcher-colors reaches fzf as one --color, as tmux expanded it.
+cat > "$TMP_DIR/fake/tmux" <<'EOF'
+#!/usr/bin/env bash
+if [ "$1" = display-message ] && [ "$3" = '#{E:@agent-switcher-colors}' ]; then
+    echo 'bg+:#112233,fg+:#445566:bold,pointer:#778899,gutter:-1'
+fi
+exit 0
+EOF
+seed_rows
+PATH="$TMP_DIR/fake:$PATH" TMUX_AGENT_SWITCHER_STATE_DIR="$STATE_DIR" bash "$SCRIPT_FILE"
+has_arg "--color=bg+:#112233,fg+:#445566:bold,pointer:#778899,gutter:-1" \
+    || fail "@agent-switcher-colors should be passed to fzf as --color"
+
 # ── Part two: the real picker ──────────────────────────────────────
 if [ -z "$REAL_TMUX" ] || [ -z "$REAL_FZF" ]; then
     echo "switcher mode binding checks passed (real fzf drive skipped: needs tmux and fzf)"
@@ -131,7 +146,11 @@ export PATH="$TMP_DIR/real:$PATH"
 
 seed_rows
 cp "$STATE_DIR/rows.seed" "$TMP_DIR/rows"
-tmux -f /dev/null new-session -d -s t -x 80 -y 12 \
+cat > "$TMP_DIR/tmux.conf" <<'EOF'
+set -g @base02 '#112233'
+set -g @agent-switcher-colors 'bg+:#{@base02},gutter:-1'
+EOF
+tmux -f "$TMP_DIR/tmux.conf" new-session -d -s t -x 80 -y 12 \
     "env TMUX_AGENT_SWITCHER_STATE_DIR='$STATE_DIR' bash '$SCRIPT_FILE'; echo PICKER-EXITED; sleep 600"
 
 screen() {
@@ -160,6 +179,8 @@ reject_screen() {
 expect_screen '^› *$' "the picker should open in normal mode with an empty › prompt"
 expect_screen 'i search  m pin' "normal mode should show the normal hint"
 expect_screen 'avocado' "the seeded rows should be listed"
+ps -eo args= | grep -F -- "--listen=$STATE_DIR/fzf.sock" | grep -Fq -- "--color=bg+:#112233,gutter:-1" \
+    || fail "the tmux formats in @agent-switcher-colors should be expanded at launch"
 
 tmux send-keys -t t a z w
 reject_screen '^› .*[azw]' "letters should not type into the query in normal mode"

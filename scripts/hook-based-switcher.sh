@@ -1037,6 +1037,14 @@ start_row() {
 # clips. Drop the inherited options; every flag this picker wants is explicit.
 unset FZF_DEFAULT_OPTS FZF_DEFAULT_OPTS_FILE
 
+# Selection colours: @agent-switcher-colors is a raw fzf --color spec whose
+# tmux formats are expanded here, at launch, so it can follow the theme, e.g.
+#   'bg+:#{@base02},fg+:#{@base05}:bold,pointer:#{@base0A},gutter:-1'
+# Unset or empty adds no --color, leaving fzf's defaults.
+color_args=()
+switcher_colors=$(tmux display-message -p '#{E:@agent-switcher-colors}' 2>/dev/null || true)
+[ -n "$switcher_colors" ] && color_args=(--color="$switcher_colors")
+
 initial_rows=$(emit_initial_rows)
 initial_pos=$(start_row "$(start_target)" <<< "$initial_rows")
 
@@ -1068,6 +1076,8 @@ selected=$(printf '%s\n' "$initial_rows" | sed '/^$/d' | fzf \
     --bind="change:first" \
     --track \
     --id-nth=2 \
+    --highlight-line \
+    "${color_args[@]}" \
     --layout=reverse \
     --info=hidden \
     --no-separator \
