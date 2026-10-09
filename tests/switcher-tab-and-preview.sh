@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ctrl-i (the same byte as tab) branches on mode: structural expand in tree,
-# pin toggle in agents (the picker stays open and reloads). ctrl-r renames in
-# agents and does nothing in tree. ctrl-p toggles the preview in both modes, under both display
+# pin toggle in agents (the picker stays open and reloads). ctrl-r renames in the
+# picker in agents and does nothing in tree. ctrl-p toggles the preview in both modes, under both display
 # methods — in a popup by relaunching it, in a window in place.
 set -euo pipefail
 
@@ -59,13 +59,30 @@ case "$agents_action" in
 esac
 
 # ── ctrl-r ────────────────────────────────────────────────────────
-rename_action="$(switcher --rename-action)"
+rename_action="$(switcher --rename-action 't:%5')"
 case "$rename_action" in
-    execute-silent\(*pin-target.sh*--rename*\{2\}*\)+abort) ;;
-    *) fail "agents mode should open the rename prompt and close the picker: $rename_action" ;;
+    unbind\(*\)+disable-search+change-prompt\(*\)+change-header\(*\)+change-query:*) ;;
+    *) fail "agents mode should edit the tag in the picker's query line: $rename_action" ;;
 esac
+case "$rename_action" in
+    *abort*) fail "renaming should keep the picker open: $rename_action" ;;
+esac
+[ "$(cat "$STATE_DIR/rename-target")" = "t:%5" ] || fail "rename should remember its target"
+enter_action="$(FZF_PROMPT='tag › ' FZF_QUERY='abc' switcher --enter-action)"
+case "$enter_action" in
+    clear-query+*rebind*+reload\(*--rows\)) ;;
+    *) fail "enter in rename should leave rename mode and reload: $enter_action" ;;
+esac
+[ ! -f "$STATE_DIR/rename-target" ] || fail "enter should consume the rename target"
+[ "$(FZF_PROMPT='› ' switcher --enter-action)" = "accept" ] || fail "enter outside rename should switch"
+esc_action="$(FZF_PROMPT='tag › ' switcher --esc-action)"
+case "$esc_action" in
+    clear-query+*rebind*) ;;
+    *) fail "esc in rename should cancel back to normal: $esc_action" ;;
+esac
+[ "$(switcher --rename-action 't')" = "ignore" ] || fail "rename should ignore a session row"
 switcher --set-mode tree
-[ "$(switcher --rename-action)" = "ignore" ] || fail "rename should do nothing in tree mode"
+[ "$(switcher --rename-action 't:%5')" = "ignore" ] || fail "rename should do nothing in tree mode"
 
 # ── ctrl-p, window display method (in place) ──────────────────────
 grep -Fq 'ctrl_p_bind="change-preview-window($(preview_window_spec)|$(preview_window_spec),hidden)"' "$SCRIPT_FILE" \

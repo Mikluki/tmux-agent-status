@@ -7,11 +7,12 @@
 #   --toggle <session:pane>   m / ctrl-i. Unpinned: pin under the derived tag,
 #                             no prompt. Pinned: unpin. The picker stays open
 #                             and reloads its rows.
-#   --rename <session:pane>   r / ctrl-r. Opens a prompt prefilled with the
-#                             current tag, or the derived one when unpinned;
-#                             Enter pins or renames. Empty input or Esc leaves
-#                             the pin as it was.
-#   --apply <pane> <tag>      The prompt's callback.
+#   --initial <session:pane>  r / ctrl-r. Prints the tag the picker's rename
+#                             prompt starts from: the current tag, or the
+#                             derived one when unpinned.
+#   --apply <pane> <tag>      Pin or rename. Empty input leaves the pin as it
+#                             was. The picker's and the prompt's callback.
+#   --rename <session:pane>   Opens the same prompt on the tmux status line.
 
 set -euo pipefail
 
@@ -70,6 +71,15 @@ toggle_pin() {
     pin_checked "$pane_id" "$(derived_tag_for "$sel_name")"
 }
 
+initial_tag() {
+    local sel_name="$1"
+    local tag=""
+
+    tag=$(pin_tag_for "${sel_name##*:}" || true)
+    [ -n "$tag" ] || tag=$(derived_tag_for "$sel_name")
+    printf '%s\n' "$tag"
+}
+
 prompt_rename() {
     local sel_name="$1"
     local pane_id="${sel_name##*:}"
@@ -77,8 +87,7 @@ prompt_rename() {
 
     [[ "$pane_id" == %* ]] || return 0
 
-    initial=$(pin_tag_for "$pane_id" || true)
-    [ -n "$initial" ] || initial=$(derived_tag_for "$sel_name")
+    initial=$(initial_tag "$sel_name")
 
     # command-prompt substitutes the reply for the first %% and for every %1
     # in the template, so a pane id like %12 would be rewritten into the tag.
@@ -107,6 +116,9 @@ case "${1:-}" in
         ;;
     --toggle)
         toggle_pin "${2:-}"
+        ;;
+    --initial)
+        initial_tag "${2:-}"
         ;;
     --rename)
         prompt_rename "${2:-}"

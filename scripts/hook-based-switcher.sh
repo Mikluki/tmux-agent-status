@@ -611,8 +611,10 @@ emit_close_fzf_actions() {
 # binds every typeable key, so the query cannot change there.
 PICKER_NORMAL_PROMPT='› '
 PICKER_INSERT_PROMPT='/ '
+PICKER_RENAME_PROMPT='tag › '
 PICKER_NORMAL_HINT='i search  m pin  r rename  p preview  x close  q quit'
 PICKER_INSERT_HINT='esc normal  C-i pin  C-r rename  C-p preview  C-x close'
+PICKER_RENAME_HINT='enter save  esc cancel'
 
 # Keys that act in normal mode and type in insert mode. Every letter, digit,
 # and the common symbols, so a stray key in normal mode is a no-op rather
@@ -641,14 +643,70 @@ picker_normal_action() {
         "$(picker_normal_keys)" "$PICKER_NORMAL_PROMPT" "$(picker_header "$PICKER_NORMAL_HINT")"
 }
 
-# esc: back to normal from insert (query kept), quit from normal. fzf exports
-# the live prompt as $FZF_PROMPT to transform commands.
-picker_esc_action() {
-    if [ "${FZF_PROMPT:-}" = "$PICKER_INSERT_PROMPT" ]; then
-        picker_normal_action
-    else
-        printf 'abort\n'
+# Rename mode: r / ctrl-r edit the row's tag in fzf's own query line, so the
+# picker stays open. Every key that acts on rows or moves the cursor is
+# unbound, change too (its `first` would jump the cursor off the row being
+# renamed), and search is off so the list does not filter on the tag. The
+# target is fixed when rename starts, in the state dir.
+picker_rename_locked_keys() {
+    printf '%s,tab,ctrl-r,ctrl-x,ctrl-p,ctrl-f,ctrl-j,ctrl-k,up,down,change\n' "$(picker_normal_keys)"
+}
+
+picker_rename_action() {
+    local target="$1" initial=""
+
+    if [ "$(current_mode)" != "agents" ] || [[ "$target" != *:%* ]]; then
+        printf 'ignore\n'
+        return 0
     fi
+
+    printf '%s\n' "$target" > "$SWITCHER_STATE_DIR/rename-target"
+    initial=$(bash "$SCRIPT_DIR/pin-target.sh" --initial "$target" 2>/dev/null || true)
+    # change-query:<arg> takes the rest of the line, so any tag is safe there.
+    printf 'unbind(%s)+disable-search+change-prompt(%s)+change-header(%s)+change-query:%s\n' \
+        "$(picker_rename_locked_keys)" "$PICKER_RENAME_PROMPT" \
+        "$(picker_header "$PICKER_RENAME_HINT")" "$initial"
+}
+
+# Leave rename mode for normal mode, with the query cleared.
+picker_rename_end_action() {
+    printf 'clear-query+enable-search+rebind(%s)+change-prompt(%s)+change-header(%s)\n' \
+        "$(picker_rename_locked_keys)" "$PICKER_NORMAL_PROMPT" "$(picker_header "$PICKER_NORMAL_HINT")"
+}
+
+# enter: save the typed tag in rename mode, switch to the row otherwise. The
+# tag is applied here, in the transform, from fzf's $FZF_QUERY, so it never
+# passes through fzf's action parser.
+picker_enter_action() {
+    local target=""
+
+    if [ "${FZF_PROMPT:-}" != "$PICKER_RENAME_PROMPT" ]; then
+        printf 'accept\n'
+        return 0
+    fi
+
+    [ -f "$SWITCHER_STATE_DIR/rename-target" ] && target=$(<"$SWITCHER_STATE_DIR/rename-target")
+    rm -f "$SWITCHER_STATE_DIR/rename-target"
+    [ -n "$target" ] && bash "$SCRIPT_DIR/pin-target.sh" --apply "${target##*:}" "${FZF_QUERY:-}" >/dev/null 2>&1
+    printf '%s+reload(bash %q --state-dir %q --rows)\n' \
+        "$(picker_rename_end_action)" "$0" "$SWITCHER_STATE_DIR"
+}
+
+# esc: back to normal from insert (query kept), cancel a rename, quit from
+# normal. fzf exports the live prompt as $FZF_PROMPT to transform commands.
+picker_esc_action() {
+    case "${FZF_PROMPT:-}" in
+        "$PICKER_INSERT_PROMPT")
+            picker_normal_action
+            ;;
+        "$PICKER_RENAME_PROMPT")
+            rm -f "$SWITCHER_STATE_DIR/rename-target"
+            picker_rename_end_action
+            ;;
+        *)
+            printf 'abort\n'
+            ;;
+    esac
 }
 
 parse_args() {
@@ -663,7 +721,7 @@ parse_args() {
                 configure_state_dir "$2"
                 shift 2
                 ;;
-            --rows|--list|--rows-agents|--rows-tree|--toggle-mode|--tab-action|--rename-action|--preview-action|--esc-action)
+            --rows|--list|--rows-agents|--rows-tree|--toggle-mode|--tab-action|--preview-action|--esc-action|--enter-action)
                 SWITCHER_COMMAND="$1"
                 shift
                 ;;
@@ -671,7 +729,7 @@ parse_args() {
                 SWITCHER_FOCUS="${2:-}"
                 shift 2
                 ;;
-            --set-mode|--request-relaunch)
+            --set-mode|--request-relaunch|--rename-action)
                 SWITCHER_COMMAND="$1"
                 SWITCHER_ARG1="${2:-}"
                 shift 2
@@ -735,14 +793,13 @@ case "${SWITCHER_COMMAND:-}" in
         exit 0
         ;;
     --rename-action)
-        # r / ctrl-r: pin under a typed tag, or rename. The tag prompt lives on
-        # the tmux status line, which the popup covers, so abort the picker and
-        # let the prompt (opened with -b) outlive it. Agents mode only.
-        if [ "$(current_mode)" = "agents" ]; then
-            printf "execute-silent(bash %q --rename {2})+abort\n" "$SCRIPT_DIR/pin-target.sh"
-        else
-            printf 'ignore\n'
-        fi
+        # r / ctrl-r: pin under a typed tag, or rename, without leaving the
+        # picker. Agents mode only.
+        picker_rename_action "$SWITCHER_ARG1"
+        exit 0
+        ;;
+    --enter-action)
+        picker_enter_action
         exit 0
         ;;
     --esc-action)
@@ -936,7 +993,7 @@ ctrl_f_bind="$ctrl_p_bind"
 # Now each picker mode has its own short hint line (see PICKER_*_HINT), and
 # change-header swaps it on every mode switch.
 tab_bind="transform(bash '$0' --state-dir '$state_dir' --tab-action)"
-rename_bind="transform(bash '$0' --state-dir '$state_dir' --rename-action)"
+rename_bind="transform(bash '$0' --state-dir '$state_dir' --rename-action {2})"
 close_bind="transform(bash '$0' --state-dir '$state_dir' --close-fzf-actions {2} {1})"
 
 # Normal-mode letters: the actions, plus `ignore` for every other typeable
@@ -1071,6 +1128,7 @@ selected=$(printf '%s\n' "$initial_rows" | sed '/^$/d' | fzf \
     --bind="ctrl-r:$rename_bind" \
     --bind="ctrl-x:$close_bind" \
     --bind="esc:transform(bash '$0' --state-dir '$state_dir' --esc-action)" \
+    --bind="enter:transform(bash '$0' --state-dir '$state_dir' --enter-action)" \
     --bind="$normal_binds" \
     --bind="load:pos($initial_pos)+unbind(load)" \
     --bind="change:first" \

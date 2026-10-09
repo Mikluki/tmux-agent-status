@@ -175,10 +175,9 @@ flush_client_queue
 reset_waits
 
 # ── pin and rename from inside the popup picker ─────────────────────
-# The real flow, agents mode: m pins under the derived tag (or unpins) and
-# the picker stays open; r runs pin-target.sh --rename through execute-silent
-# and aborts, closing the popup. The prompt must survive the popup closing -
-# without -b it is dropped.
+# The real flow, agents mode: m pins under the derived tag (or unpins), and
+# r edits the tag in the picker's own query line. The picker stays open
+# through both.
 if command -v fzf >/dev/null 2>&1 && command -v curl >/dev/null 2>&1; then
     STATE_DIR="$TMP_DIR/state"
     mkdir -p "$STATE_DIR" "$STATUS_DIR/panes"
@@ -251,24 +250,52 @@ if command -v fzf >/dev/null 2>&1 && command -v curl >/dev/null 2>&1; then
     [ -S "$STATE_DIR/fzf.sock" ] || fail "the picker should stay open after unpinning"
     wait_picker_idle "!  $derived "
 
+    picker_query() {
+        picker_state | sed -n 's/.*"query":"\([^"]*\)".*/\1/p'
+    }
+
     printf 'r' >&3
-    wait_prompt
-    wait_for '[ ! -S "$STATE_DIR/fzf.sock" ]' || fail "the picker should close after r"
+    wait_for '[ "$(picker_query)" = "$derived" ]' \
+        || fail "r should prefill the derived tag $derived (query: '$(picker_query)')"
     printf '\025' >&3
     type_reply "xyz"
     wait_for '[ "$(tmux show-option -gqv @agent-pins)" = "xyz:$pane_id:" ]' \
         || fail "r should pin under the typed tag (got '$(tmux show-option -gqv @agent-pins)')"
+    [ -S "$STATE_DIR/fzf.sock" ] || fail "the picker should stay open after a rename"
+    wait_picker_idle "  xyz "
+    wait_for '[ -z "$(picker_query)" ]' || fail "saving a rename should clear the query (query: '$(picker_query)')"
 
-    # An empty reply leaves the pin alone.
-    open_picker
+    # Back in normal mode: m acts again.
+    printf 'm' >&3
+    wait_for '[ -z "$(tmux show-option -gqv @agent-pins)" ]' || fail "m after a rename should unpin"
+    wait_picker_idle "!  xyz "
+    printf 'm' >&3
+    wait_for '[ -n "$(tmux show-option -gqv @agent-pins)" ]' || fail "m should pin again"
+    wait_picker_idle "  $derived "
+
+    # Renaming a pinned row prefills its tag; esc cancels and an empty reply
+    # changes nothing, and the picker stays open through both.
     printf 'r' >&3
-    wait_prompt
-    wait_for '[ ! -S "$STATE_DIR/fzf.sock" ]' || fail "the picker should close after r"
+    wait_for '[ "$(picker_query)" = "$derived" ]' || fail "r should prefill the current tag"
+    printf 'q\033' >&3
+    wait_for '[ ! -f "$STATE_DIR/rename-target" ] && [ -z "$(picker_query)" ]' \
+        || fail "esc should cancel the rename"
+    [ "$(tmux show-option -gqv @agent-pins)" = "$derived:$pane_id:" ] || fail "a cancelled rename should leave the pin alone"
+    [ -S "$STATE_DIR/fzf.sock" ] || fail "esc in rename should not close the picker"
+
+    printf 'r' >&3
+    wait_for '[ "$(picker_query)" = "$derived" ]' || fail "r should prefill the current tag again"
     printf '\025' >&3
     type_reply ""
-    flush_client_queue
-    [ "$(tmux show-option -gqv @agent-pins)" = "xyz:$pane_id:" ] \
+    wait_for '[ ! -f "$STATE_DIR/rename-target" ]' || fail "an empty rename should leave rename mode"
+    wait_picker_idle "  $derived "
+    [ "$(tmux show-option -gqv @agent-pins)" = "$derived:$pane_id:" ] \
         || fail "an empty rename should leave the pin alone (got '$(tmux show-option -gqv @agent-pins)')"
+    [ -S "$STATE_DIR/fzf.sock" ] || fail "the picker should stay open after an empty rename"
+
+    # Normal mode again: q quits.
+    printf 'q' >&3
+    wait_for '[ ! -S "$STATE_DIR/fzf.sock" ]' || fail "q should quit the picker after a rename"
 else
     echo "(popup picker check skipped: needs fzf and curl)"
 fi

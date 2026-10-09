@@ -324,10 +324,10 @@ free of those plus 2-9 (`wor`, `wor2`, `wor3`) when another agent already
 holds it. On a pinned row it unpins. The picker stays open and the tag column
 updates in place.
 
-`r` / `Ctrl-R` closes the picker and opens a prompt prefilled with the row's
-tag (or the derived one when unpinned); Enter pins or renames. An empty reply
-or `Esc` changes nothing, and an invalid tag or one another agent already
-holds is rejected with a message.
+`r` / `Ctrl-R` turns the picker's query line into a `tag ›` prompt prefilled
+with the row's tag (or the derived one when unpinned); Enter pins or renames
+and the picker stays open. An empty reply or `Esc` changes nothing, and an
+invalid tag or one another agent already holds is rejected with a message.
 
 Inside the sidebar:
 
