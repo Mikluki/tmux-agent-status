@@ -75,8 +75,8 @@ pins_summary() {
 
 # ── Tag validation ────────────────────────────────────────────────
 pin_tag_valid "bug"   || { echo "Assertion failed: 'bug' should be a valid tag" >&2; exit 1; }
-pin_tag_valid "abcd"  || { echo "Assertion failed: a four-character tag should be valid" >&2; exit 1; }
-pin_tag_valid "abcde" && { echo "Assertion failed: a five-character tag should be rejected" >&2; exit 1; }
+pin_tag_valid "abcde" || { echo "Assertion failed: a five-character tag should be valid" >&2; exit 1; }
+pin_tag_valid "abcdef" && { echo "Assertion failed: a six-character tag should be rejected" >&2; exit 1; }
 pin_tag_valid "a b"   && { echo "Assertion failed: whitespace should be rejected" >&2; exit 1; }
 pin_tag_valid "a:b"   && { echo "Assertion failed: the record separator should be rejected" >&2; exit 1; }
 pin_tag_valid ""      && { echo "Assertion failed: an empty tag should be rejected" >&2; exit 1; }
@@ -147,7 +147,7 @@ grep -q "already taken" "$MESSAGE_LOG" || { echo "Assertion failed: a duplicate 
 : > "$MESSAGE_LOG"
 apply "%14" "far-too-long"
 assert_eq "task=%12 " "$(pins_summary)" "--apply should refuse an over-long tag"
-grep -q "1-4 characters" "$MESSAGE_LOG" || { echo "Assertion failed: an invalid tag should be reported" >&2; exit 1; }
+grep -q "1-5 characters" "$MESSAGE_LOG" || { echo "Assertion failed: an invalid tag should be reported" >&2; exit 1; }
 
 : > "$MESSAGE_LOG"
 apply "%12" ""

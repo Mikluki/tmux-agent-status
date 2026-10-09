@@ -528,7 +528,7 @@ get_agents_rows() {
         # fzf-invisible tmux coordinate - the real target still travels in
         # field 2, which is what Enter uses).
         # SORTKEY \t row …  SORTKEY = pri (desc) + order (asc)
-        printf '%d\t%010d\tP\t%s:%s\t%b  %-4s  %-7s  %-4s  %-*s  %s\n' \
+        printf '%d\t%010d\tP\t%s:%s\t%b  %-5s  %-7s  %-4s  %-*s  %s\n' \
             "$pri" "$order" \
             "$session" "$pane_id" \
             "$(status_icon "$status")" "$tag" "$status" "$age" \

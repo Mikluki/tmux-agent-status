@@ -285,7 +285,7 @@ bug  rfc✓  perf?   ·6
 | pane gone | muted (bright black), bare |
 
 Tags are assigned when you pin (`m` or `ctrl-i` in the switcher's agents view), are
-1-4 characters, must be unique, and keep the order you pinned them in — the
+1-5 characters, must be unique, and keep the order you pinned them in — the
 bar is never re-sorted, so where a tag sits is part of how you read it.
 Nothing on the bar varies with time: no durations and no animation, so a
 glance costs nothing when nothing has changed. Age lives in the picker

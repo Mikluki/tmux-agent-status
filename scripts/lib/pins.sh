@@ -20,7 +20,7 @@
 _PINS_LIB_LOADED=1
 
 PINS_OPTION="@agent-pins"
-PINS_TAG_MAX=4
+PINS_TAG_MAX=5
 
 # One "tag<TAB>pane_id<TAB>last_state" line per pin, in pin order.
 pins_read() {
@@ -60,7 +60,7 @@ pin_tag_for() {
     return 1
 }
 
-# Tags are 1-4 characters with no whitespace and no ":" (the record separator).
+# Tags are 1-5 characters with no whitespace and no ":" (the record separator).
 pin_tag_valid() {
     local tag="$1"
     [ -n "$tag" ] || return 1

@@ -81,9 +81,9 @@ fail() {
 
 "$REPO_DIR/scripts/pin-target.sh" --apply "%12" "bug" >/dev/null 2>&1
 
-plain_rows | grep -Fq '⣾  bug   working  4m    api  worktree-a' \
+plain_rows | grep -Fq '⣾  bug    working  4m    api  worktree-a' \
     || fail "a pinned row should show its tag and the age of its state"
-plain_rows | grep -Fq '?        ask      ' \
+plain_rows | grep -Fq '?         ask      ' \
     || fail "an unpinned row should leave the tag column blank"
 plain_rows | grep -Eq '⏸ +wait +[0-9]+s +ml +' \
     || fail "every agent pane should still be listed, with its age"
