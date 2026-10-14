@@ -68,23 +68,41 @@ pin_tag_valid() {
     [[ "$tag" != *[[:space:]:]* ]]
 }
 
-# pin_derive_tag <window_name> <session_name> <pane_id>
-# Tag to prefill the pin prompt with for an unpinned row: the window name
-# trimmed to three characters, falling back to the session name. If another
-# pane already holds that, the first free of base2..base9 instead, so Enter on
-# the prefill pins even when several agents share a window name. If all are
-# taken, the bare base, and pin_set's rejection reports it.
+# Strip trailing dots, so "0037.run" cut short reads "0037", not "0037.".
+_pin_trim_dots() {
+    local s="$1"
+    while [[ "$s" == *. ]]; do
+        s="${s%.}"
+    done
+    printf '%s\n' "$s"
+}
+
+# pin_derive_tag <agent_name> <window_name> <session_name> <pane_id>
+# Tag to prefill the pin prompt with for an unpinned row: the agent session's
+# own name (Claude's /rename) trimmed to five characters, else the window name
+# trimmed to three, falling back to the session name. If another pane already
+# holds that, the first free of base2..base9 instead (the base cut to four
+# characters so the variant still fits), so Enter on the prefill pins even when
+# several agents share a name. If all are taken, the bare base, and pin_set's
+# rejection reports it.
 pin_derive_tag() {
-    local window_name="$1"
-    local session_name="$2"
-    local pane_id="${3:-}"
-    local base="$window_name"
+    local agent_name="$1"
+    local window_name="$2"
+    local session_name="$3"
+    local pane_id="${4:-}"
+    local base stem
     local -A held=()
     local tag pane state n
 
-    [ -n "$base" ] || base="$session_name"
-    base="${base//[[:space:]:]/}"
-    base="${base:0:3}"
+    base="${agent_name//[[:space:]:]/}"
+    base=$(_pin_trim_dots "${base:0:PINS_TAG_MAX}")
+
+    if [ -z "$base" ]; then
+        base="$window_name"
+        [ -n "$base" ] || base="$session_name"
+        base="${base//[[:space:]:]/}"
+        base="${base:0:3}"
+    fi
 
     if [ -n "$base" ]; then
         while IFS=$'\t' read -r tag pane state; do
@@ -92,9 +110,10 @@ pin_derive_tag() {
         done < <(pins_read)
 
         if [ -n "${held[$base]:-}" ]; then
+            stem=$(_pin_trim_dots "${base:0:PINS_TAG_MAX-1}")
             for n in 2 3 4 5 6 7 8 9; do
-                if [ -z "${held[$base$n]:-}" ]; then
-                    printf '%s\n' "$base$n"
+                if [ -z "${held[$stem$n]:-}" ]; then
+                    printf '%s\n' "$stem$n"
                     return 0
                 fi
             done

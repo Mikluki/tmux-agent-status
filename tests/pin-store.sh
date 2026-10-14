@@ -30,7 +30,9 @@ case "${1:-}" in
         fi
         ;;
     display-message)
-        if [ "${2:-}" = "-p" ]; then
+        if [ "${2:-}" = "-p" ] && [ "${5:-}" = "#{@agent-transcript}" ]; then
+            printf '%s\n' "${TMUX_FAKE_TRANSCRIPT:-}"
+        elif [ "${2:-}" = "-p" ]; then
             echo "worktree-alpha"
         else
             printf '%s\n' "${2:-}" >> "${TMUX_MESSAGE_LOG:?}"
@@ -82,14 +84,19 @@ pin_tag_valid "a:b"   && { echo "Assertion failed: the record separator should b
 pin_tag_valid ""      && { echo "Assertion failed: an empty tag should be rejected" >&2; exit 1; }
 
 # ── Derived tag ───────────────────────────────────────────────────
-assert_eq "wor" "$(pin_derive_tag "worktree-a" "api")" "an unpinned row should derive from the window name"
-assert_eq "api" "$(pin_derive_tag "" "api")" "a nameless window should fall back to the session name"
+assert_eq "wor" "$(pin_derive_tag "" "worktree-a" "api")" "an unpinned row should derive from the window name"
+assert_eq "api" "$(pin_derive_tag "" "" "api")" "a nameless window should fall back to the session name"
+assert_eq "commi" "$(pin_derive_tag "committer" "worktree-a" "api")" "a session name should win over the window, cut to five"
+assert_eq "0037" "$(pin_derive_tag "0037.run" "worktree-a" "api")" "a cut that ends in a dot should drop it"
+assert_eq "0036" "$(pin_derive_tag "0036" "worktree-a" "api")" "a short session name should be kept whole"
+assert_eq "aggre" "$(pin_derive_tag "aggressive cuts" "worktree-a" "api")" "whitespace in a session name should be dropped"
+assert_eq "wor" "$(pin_derive_tag " ..." "worktree-a" "api")" "a session name with nothing left should fall back to the window"
 
 # The prefill is always free: when another pane holds the base, the first
 # free of base2..base9, so Enter on the prefill pins instead of colliding.
 derive_checked() {
     local tag
-    tag=$(pin_derive_tag "worktree-a" "api" "$1")
+    tag=$(pin_derive_tag "${2:-}" "worktree-a" "api" "$1")
     pin_tag_valid "$tag" || { echo "Assertion failed: derived tag '$tag' should be valid" >&2; exit 1; }
     printf '%s\n' "$tag"
 }
@@ -105,6 +112,15 @@ for n in 3 4 5 6 7 8 9; do pin_set "%4$n" "wor$n"; done
 assert_eq "wor" "$(derive_checked "%50")" "with every variant held, the bare base is left to the rejection"
 assert_eq "wor" "$(derive_checked "%40")" "a pane's own pin should not count as held"
 for n in 0 2 3 4 5 6 7 8 9; do pin_remove "%4$n"; done
+
+# A five-character base is cut to four before its variant, so it still fits.
+pin_set "%40" "commi"
+assert_eq "comm2" "$(derive_checked "%50" "committer")" "a held five-character base should derive base-cut-to-four plus 2"
+pin_set "%40" "ab.cd"
+assert_eq "ab.c2" "$(derive_checked "%50" "ab.cd")" "the variant cut should keep an inner dot"
+pin_set "%40" "abc.d"
+assert_eq "abc2" "$(derive_checked "%50" "abc.d")" "the variant cut should not leave a dot before the digit"
+pin_remove "%40"
 assert_eq "" "$(pins_summary)" "the derivation fixtures should leave the store empty"
 
 # ── Pin, rename, unpin ────────────────────────────────────────────
@@ -184,6 +200,29 @@ for n in "" 3 4 5 6 7 8 9; do pin_remove "%6$n"; done
 pin_remove "%14"
 toggle "api"
 assert_eq "" "$(pins_summary)" "a toggle on a row without a pane should do nothing"
+
+# A Claude pane names its tag after the latest /rename in its transcript.
+TRANSCRIPT="$TMP_DIR/session.jsonl"
+cat > "$TRANSCRIPT" <<'JSONL_EOF'
+{"type":"custom-title","customTitle":"first.name","sessionId":"s"}
+{"type":"user","message":{"role":"user","content":"hi"}}
+{"type":"custom-title","customTitle":"committer","sessionId":"s"}
+JSONL_EOF
+export TMUX_FAKE_TRANSCRIPT="$TRANSCRIPT"
+toggle "api:%12"
+assert_eq "commi=%12 " "$(pins_summary)" "toggling a renamed Claude pane should pin under its latest /rename name"
+pin_remove "%12"
+
+printf '%s\n' '{"type":"user","message":{"role":"user","content":"hi"}}' > "$TRANSCRIPT"
+toggle "api:%12"
+assert_eq "wor=%12 " "$(pins_summary)" "an unrenamed Claude pane should fall back to the window name"
+pin_remove "%12"
+
+export TMUX_FAKE_TRANSCRIPT="$TMP_DIR/missing.jsonl"
+toggle "api:%12"
+assert_eq "wor=%12 " "$(pins_summary)" "a missing transcript should fall back to the window name"
+pin_remove "%12"
+unset TMUX_FAKE_TRANSCRIPT
 
 # ── The prompt itself ─────────────────────────────────────────────
 : > "$MESSAGE_LOG"

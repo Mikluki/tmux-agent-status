@@ -319,9 +319,11 @@ Inside the popup switcher:
 - `Ctrl-X` on a session immediately closes that session and all child windows and panes
 
 In the agents view, `m` / `Ctrl-I` pins an unpinned row straight away under
-a tag derived from its window name: the first three characters, or the first
-free of those plus 2-9 (`wor`, `wor2`, `wor3`) when another agent already
-holds it. On a pinned row it unpins. The picker stays open and the tag column
+a derived tag: the first five characters of the Claude session's `/rename`
+name (`0037.run` → `0037`), or, for an unnamed session or another agent, the
+first three of its window name. When another agent already holds it, the
+first free of those plus 2-9 instead (`wor`, `wor2`, `wor3`; `commi`,
+`comm2`). On a pinned row it unpins. The picker stays open and the tag column
 updates in place.
 
 `r` / `Ctrl-R` turns the picker's query line into a `tag ›` prompt prefilled

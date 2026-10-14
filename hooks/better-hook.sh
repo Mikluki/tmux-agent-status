@@ -100,6 +100,27 @@ mark_refresh() {
     touch "$REFRESH_FILE" 2>/dev/null || true
 }
 
+# Remember the pane's transcript in the pane option @agent-transcript, so a
+# pin can default to the session's /rename name. A pane option dies with the
+# pane, so a recycled pane id never inherits it. /clear and /resume switch
+# transcripts; the next prompt or stop records the new one.
+record_transcript() {
+    local json="$1"
+    local path=""
+
+    [ -n "${TMUX_PANE:-}" ] && [ -n "$json" ] || return 0
+
+    if command -v jq >/dev/null 2>&1; then
+        path="$(printf '%s' "$json" | jq -r '.transcript_path // empty' 2>/dev/null)"
+    else
+        path="$(printf '%s' "$json" | \
+            sed -n 's/.*"transcript_path"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
+    fi
+
+    [ -n "$path" ] || return 0
+    tmux set-option -pq -t "$TMUX_PANE" @agent-transcript "$path" 2>/dev/null || true
+}
+
 # Returns 0 if the Claude Code Stop payload reports a background task that is
 # still running (e.g. a `run_in_background` Bash command). When the agent ends
 # its turn while a background task keeps working, it isn't really idle, so we
@@ -141,6 +162,7 @@ case "$HOOK_TYPE" in
         # cancel wait mode.
         clear_interaction_overrides "$TMUX_SESSION"
         set_status "$TMUX_SESSION" "working"
+        record_transcript "$HOOK_JSON"
         mark_refresh
         ;;
     PreToolUse)
@@ -159,6 +181,7 @@ case "$HOOK_TYPE" in
         else
             set_status "$TMUX_SESSION" "done"
         fi
+        record_transcript "$HOOK_JSON"
         mark_refresh
         ;;
     Notification)

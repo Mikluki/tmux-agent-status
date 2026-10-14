@@ -29,13 +29,28 @@ report() {
     tmux display-message "$1" 2>/dev/null || true
 }
 
+# The latest /rename name in the pane's Claude transcript, which the hook
+# records in @agent-transcript. Empty when the session was never renamed or
+# the pane runs another agent.
+agent_name_for() {
+    local pane_id="$1"
+    local transcript="" name=""
+
+    transcript=$(tmux display-message -p -t "$pane_id" '#{@agent-transcript}' 2>/dev/null || echo "")
+    [ -n "$transcript" ] && [ -r "$transcript" ] || return 0
+
+    name=$(grep -o '"customTitle":"[^"]*"' "$transcript" 2>/dev/null | tail -n1 || true)
+    name="${name#\"customTitle\":\"}"
+    printf '%s\n' "${name%\"}"
+}
+
 derived_tag_for() {
     local sel_name="$1"
     local pane_id="${sel_name##*:}"
     local window_name=""
 
     window_name=$(tmux display-message -p -t "$pane_id" '#{window_name}' 2>/dev/null || echo "")
-    pin_derive_tag "$window_name" "${sel_name%%:*}" "$pane_id"
+    pin_derive_tag "$(agent_name_for "$pane_id")" "$window_name" "${sel_name%%:*}" "$pane_id"
 }
 
 # Pin under the given tag, reporting a rejection instead of failing.
