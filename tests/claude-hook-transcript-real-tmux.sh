@@ -46,7 +46,7 @@ export PATH="$TMP_DIR/bin:$PATH"
 
 # A PATH with only what the hook needs, and no jq, for the sed fallback.
 ln -s "$TMP_DIR/bin/tmux" "$TMP_DIR/nojq/tmux"
-for tool in bash cat mkdir rm touch sed hostname basename dirname; do
+for tool in bash cat mkdir rm touch sed grep tail hostname basename dirname; do
     tool_path=$(command -v "$tool" || true)
     [ -n "$tool_path" ] && ln -s "$tool_path" "$TMP_DIR/nojq/$tool"
 done
@@ -70,6 +70,9 @@ transcript_of() {
 }
 
 tmux -f /dev/null new-session -d -s t -n worktree-a 'sleep 600'
+# Both panes share a window; keep its name so pane b's tag falls back to it.
+# Window naming has its own test.
+tmux set-option -g @agent-status-window-name off
 pane_a=$(tmux display-message -p -t t: '#{pane_id}')
 pane_b=$(tmux split-window -d -P -F '#{pane_id}' -t t: 'sleep 600')
 

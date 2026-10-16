@@ -103,7 +103,8 @@ mark_refresh() {
 # Remember the pane's transcript in the pane option @agent-transcript, so a
 # pin can default to the session's /rename name. A pane option dies with the
 # pane, so a recycled pane id never inherits it. /clear and /resume switch
-# transcripts; the next prompt or stop records the new one.
+# transcripts; the next start, prompt or stop records the new one. Then name
+# the window after the session.
 record_transcript() {
     local json="$1"
     local path=""
@@ -119,6 +120,33 @@ record_transcript() {
 
     [ -n "$path" ] || return 0
     tmux set-option -pq -t "$TMUX_PANE" @agent-transcript "$path" 2>/dev/null || true
+    sync_window_name "$path"
+}
+
+# Rename the pane's window to the session's latest /rename name, overwriting
+# whatever it was called, unless @agent-status-window-name is off. A session
+# that was never renamed leaves its window alone. One agent per window is
+# assumed; with several, the last to report wins.
+sync_window_name() {
+    local transcript="$1"
+    local name="" current="" mode=""
+
+    [ -r "$transcript" ] || return 0
+    name=$(grep -o '"customTitle":"[^"]*"' "$transcript" 2>/dev/null | tail -n1 || true)
+    name="${name#\"customTitle\":\"}"
+    name="${name%\"}"
+    [ -n "$name" ] || return 0
+
+    # The option and the window name in one call. The mode comes first, so a
+    # tab inside the window name cannot shift it.
+    current=$(tmux display-message -p -t "$TMUX_PANE" \
+        "#{@agent-status-window-name}"$'\t'"#{window_name}" 2>/dev/null) || return 0
+    mode="${current%%$'\t'*}"
+    current="${current#*$'\t'}"
+
+    [ "$mode" != "off" ] || return 0
+    [ "$current" != "$name" ] || return 0
+    tmux rename-window -t "$TMUX_PANE" -- "$name" 2>/dev/null || true
 }
 
 # Returns 0 if the Claude Code Stop payload reports a background task that is
@@ -157,6 +185,11 @@ HOOK_TYPE="${1:-}"
 WAIT_FILE="$WAIT_DIR/${TMUX_SESSION}.wait"
 
 case "$HOOK_TYPE" in
+    SessionStart)
+        # Launch or resume: name the window now rather than on the first
+        # prompt. The agent's state is untouched until it does something.
+        record_transcript "$HOOK_JSON"
+        ;;
     UserPromptSubmit)
         # User submitted a prompt — this is an explicit interaction, so
         # cancel wait mode.

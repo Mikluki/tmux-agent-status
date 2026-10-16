@@ -61,6 +61,16 @@ Add hooks to `~/.claude/settings.json`:
 ```json
 {
   "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.config/tmux/plugins/tmux-agent-status/hooks/better-hook.sh SessionStart"
+          }
+        ]
+      }
+    ],
     "UserPromptSubmit": [
       {
         "hooks": [
@@ -106,6 +116,8 @@ Add hooks to `~/.claude/settings.json`:
 ```
 
 Claude Code state is tracked entirely through hooks, so the plugin gets precise working/done transitions directly from the agent. If a turn ends while a background task is still running (e.g. a `run_in_background` Bash command), the `Stop` payload's `background_tasks` array keeps the session marked `working` until a later `Stop` reports the task finished — so backgrounded work doesn't show a premature green checkmark.
+
+The hook also names the agent's window after the session's `/rename` name, in full, replacing whatever the window was called. `/rename` itself runs no hook, so the window follows on your next message; `SessionStart` names it as soon as a renamed session is resumed (without that entry, on the first message instead). A session that was never renamed leaves its window alone. One agent per window is assumed; with several, the last to report wins. Set `@agent-status-window-name` to `off` to keep window names your own.
 
 ## Codex CLI Setup
 
@@ -356,6 +368,7 @@ set -g @agent-wait-key "W"
 set -g @agent-switcher-style "both"        # popup | sidebar | both
 set -g @agent-status-display-method "popup" # popup | window
 set -g @agent-sidebar-width "42"
+set -g @agent-status-window-name "on"       # on | off: window follows Claude's /rename
 
 # Switcher view (prefix + S). "tree" is the hierarchical
 # session/window/pane list (default). "agents" is a flat list of every
