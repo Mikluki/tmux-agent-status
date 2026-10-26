@@ -68,7 +68,7 @@ bind_value() {
 has_arg "--prompt=› " || fail "the picker should open in normal mode with the › prompt"
 has_arg "--highlight-line" || fail "the selected row should be highlighted across its full width"
 grep -q -- '^--color' "$ARGS" && fail "an unset @agent-switcher-colors should add no --color"
-grep -Fq -- "--header=" "$ARGS" && grep -Fq "i search  m pin  r rename  p preview  x close  q quit" "$ARGS" \
+grep -Fq -- "--header=" "$ARGS" && grep -Fq "i search  m pin  r rename  n notify  p preview  x close" "$ARGS" \
     || fail "the opening header should be the normal-mode hint"
 
 normal_line=$(grep -- '^--bind=j:down,k:up,' "$ARGS" || true)
@@ -81,6 +81,10 @@ for pair in "i:unbind(" "/:unbind(" "q:abort" \
         *) fail "normal mode should bind $pair" ;;
     esac
 done
+case "$normal_line" in
+    *",n:execute-silent("*"notify-target.sh"*"--toggle {2})+reload("*) ;;
+    *) fail "normal mode should bind n to toggle notifications and reload" ;;
+esac
 case "$normal_line" in
     *",a:ignore"*",z:ignore"*",space:ignore"*) ;;
     *) fail "unused letters should be swallowed in normal mode" ;;

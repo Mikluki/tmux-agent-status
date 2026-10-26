@@ -15,6 +15,7 @@ Demo video: [`demo/full.mp4`](demo/full.mp4)
 - Hook-based Claude Code and Codex tracking
 - Wait mode for triaging work
 - Pinned status-line watchlist with finish notifications
+- Desktop notification when a chosen agent finishes
 - Works across multi-pane sessions, worktrees, and remote tmux sessions
 
 ## Supported Agents
@@ -343,6 +344,16 @@ with the row's tag (or the derived one when unpinned); Enter pins or renames
 and the picker stays open. An empty reply or `Esc` changes nothing, and an
 invalid tag or one another agent already holds is rejected with a message.
 
+`n` in the agents view turns on a desktop notification for that agent: each
+time it goes from working to done (or to asking), you get one notification
+whose only text is the Claude session's `/rename` name (the tmux session name
+when it was never renamed, or for another agent) and what happened:
+`0037.run — done`, or `0037.run — asking`. The row
+shows a `•` after its status icon while the flag is on; `n` again turns it
+off. Like a pin, the flag lives on the pane and dies with it. It uses
+`notify-send` (`osascript` on macOS) and is sent by the collector daemon, so it
+works for every agent the plugin tracks.
+
 Inside the sidebar:
 
 - `x` closes and `w` waits on the selected row; the popup picker has no wait key, use `prefix + W`
@@ -394,7 +405,7 @@ set -g @agent-switcher-colors ""
 
 The switcher popup has two views. **Tree** (default) is the hierarchical session/window/pane list; `ctrl-i` expands/collapses. **Agents** is a flat list of every agent pane (any status) sorted by priority — `ask`, `done`, `working`, `wait` — with a tag column, the age of each agent's current state, a live preview pane, and 2-second refresh. The tag column is blank for unpinned agents, so it doubles as the pin indicator. Press `ctrl-f` inside the popup to toggle between views.
 
-The picker is modal. It opens in **normal** mode (prompt `›`): `j`/`k` move, `enter` switches, `m` pins or unpins, `r` renames, `p` toggles the preview, `x` closes, and `q` or `esc` quits; other keys do nothing. `i` or `/` enters **insert** mode (prompt `/`), where typing filters the list; `esc` returns to normal mode and keeps the filter. `ctrl-i`/`tab`, `ctrl-r`, `ctrl-p`/`ctrl-f`, `ctrl-x` and `ctrl-j`/`ctrl-k` work in both modes.
+The picker is modal. It opens in **normal** mode (prompt `›`): `j`/`k` move, `enter` switches, `m` pins or unpins, `r` renames, `n` toggles finish notifications, `p` toggles the preview, `x` closes, and `q` or `esc` quits; other keys do nothing. `i` or `/` enters **insert** mode (prompt `/`), where typing filters the list; `esc` returns to normal mode and keeps the filter. `ctrl-i`/`tab`, `ctrl-r`, `ctrl-p`/`ctrl-f`, `ctrl-x` and `ctrl-j`/`ctrl-k` work in both modes.
 
 The cursor opens on the pane you opened the picker from; if that pane is not listed, on the first agent in the same window, then the same session, then the top row. After that it follows the same agent as the list refreshes or reorders, and toggling the preview reopens on the row you were on. The selected row is highlighted across its full width; its colours come from `@agent-switcher-colors` (see [Configuration](#configuration)).
 

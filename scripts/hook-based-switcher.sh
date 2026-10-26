@@ -460,7 +460,8 @@ find_pane_agent_name_var() {
 # row shape as get_switcher_rows so the existing fzf bindings continue to work.
 #
 # The tag column is blank when a pane is unpinned, so it doubles as the pin
-# indicator — there is no separate marker to read.
+# indicator — there is no separate marker to read. A • after the status icon
+# marks a pane that notifies when it finishes (n).
 get_agents_rows() {
     local tab=$'\t' us=$'\x1f'
 
@@ -469,7 +470,7 @@ get_agents_rows() {
     # find_pane_agent_name_var above.
     _build_agent_pid_map
 
-    local session pane_id win_idx win_name cmd pane_title pane_pid
+    local session pane_id win_idx win_name cmd pane_title pane_pid notify
     local order=0
     # LOCAL PATCH (not upstream): collect first, emit second, so the session
     # column can be padded to the widest name actually present instead of
@@ -477,7 +478,7 @@ get_agents_rows() {
     local -a collected=()
     local max_sess=0
 
-    while IFS=$'\t' read -r session pane_id win_idx win_name cmd pane_title pane_pid; do
+    while IFS=$'\t' read -r session pane_id win_idx win_name cmd pane_title pane_pid notify; do
         [ -z "$session" ] && continue
         [ "$pane_title" = "agent-sidebar" ] && continue
 
@@ -509,29 +510,31 @@ get_agents_rows() {
 
         # \x1f, not tab: tag and age are often empty, and read collapses
         # runs of whitespace IFS characters, which would shift the fields.
-        collected+=("${pri}${us}${order}${us}${session}${us}${pane_id}${us}${status}${us}${tag}${us}${age}${us}${win_name}")
+        collected+=("${pri}${us}${order}${us}${session}${us}${pane_id}${us}${status}${us}${tag}${us}${age}${us}${notify}${us}${win_name}")
         (( ${#session} > max_sess )) && max_sess=${#session}
 
         order=$((order + 1))
     done < <(tmux list-panes -a -F \
-        "#{session_name}${tab}#{pane_id}${tab}#{window_index}${tab}#{window_name}${tab}#{pane_current_command}${tab}#{pane_title}${tab}#{pane_pid}" 2>/dev/null)
+        "#{session_name}${tab}#{pane_id}${tab}#{window_index}${tab}#{window_name}${tab}#{pane_current_command}${tab}#{pane_title}${tab}#{pane_pid}${tab}#{?@agent-notify,1,0}" 2>/dev/null)
 
     {
-    local rec
+    local rec mark
     for rec in "${collected[@]}"; do
-        IFS="$us" read -r pri order session pane_id status tag age win_name <<< "$rec"
+        IFS="$us" read -r pri order session pane_id status tag age notify win_name <<< "$rec"
+        mark=" "
+        [ "$notify" = "1" ] && mark="•"
         # LOCAL PATCH (not upstream): display is
-        # `icon  tag  status  age  session  window`. The tag is blank when the
-        # pane is unpinned, so it doubles as the pin indicator; age is time in
-        # the current state. Dropped the `[claude]` badge (every row carries
+        # `icon•tag  status  age  session  window`, • when the pane notifies.
+        # The tag is blank when the pane is unpinned, so it doubles as the pin
+        # indicator; age is time in the current state. Dropped the `[claude]` badge (every row carries
         # it, so it separates nothing) and the `:win.pane` suffix (an
         # fzf-invisible tmux coordinate - the real target still travels in
         # field 2, which is what Enter uses).
         # SORTKEY \t row …  SORTKEY = pri (desc) + order (asc)
-        printf '%d\t%010d\tP\t%s:%s\t%b  %-5s  %-7s  %-4s  %-*s  %s\n' \
+        printf '%d\t%010d\tP\t%s:%s\t%b%s %-5s  %-7s  %-4s  %-*s  %s\n' \
             "$pri" "$order" \
             "$session" "$pane_id" \
-            "$(status_icon "$status")" "$tag" "$status" "$age" \
+            "$(status_icon "$status")" "$mark" "$tag" "$status" "$age" \
             "$max_sess" "$session" "$win_name"
     done
     } | sort -k1,1nr -k2,2n | cut -f3-
@@ -612,7 +615,8 @@ emit_close_fzf_actions() {
 PICKER_NORMAL_PROMPT='› '
 PICKER_INSERT_PROMPT='/ '
 PICKER_RENAME_PROMPT='tag › '
-PICKER_NORMAL_HINT='i search  m pin  r rename  p preview  x close  q quit'
+# q quit is left off the hint so it still fits the 60-column bare popup.
+PICKER_NORMAL_HINT='i search  m pin  r rename  n notify  p preview  x close'
 PICKER_INSERT_HINT='esc normal  C-i pin  C-r rename  C-p preview  C-x close'
 PICKER_RENAME_HINT='enter save  esc cancel'
 
@@ -995,15 +999,18 @@ ctrl_f_bind="$ctrl_p_bind"
 tab_bind="transform(bash '$0' --state-dir '$state_dir' --tab-action)"
 rename_bind="transform(bash '$0' --state-dir '$state_dir' --rename-action {2})"
 close_bind="transform(bash '$0' --state-dir '$state_dir' --close-fzf-actions {2} {1})"
+# n: notifications on or off for the row's pane. Rows that are not panes are
+# ignored by notify-target.sh itself.
+notify_bind="execute-silent(bash '$SCRIPT_DIR/notify-target.sh' --toggle {2})+reload(bash '$0' --state-dir '$state_dir' --rows)"
 
 # Normal-mode letters: the actions, plus `ignore` for every other typeable
 # key so nothing reaches the query. Insert mode unbinds this whole set.
 normal_binds="j:down,k:up,i:$(picker_insert_action),/:$(picker_insert_action),q:abort"
-normal_binds+=",m:$tab_bind,r:$rename_bind,p:$ctrl_p_bind,x:$close_bind"
+normal_binds+=",m:$tab_bind,r:$rename_bind,n:$notify_bind,p:$ctrl_p_bind,x:$close_bind"
 IFS=, read -r -a _picker_keys <<< "$(picker_normal_keys)"
 for _key in "${_picker_keys[@]}"; do
     case "$_key" in
-        j|k|i|/|q|m|r|p|x) ;;
+        j|k|i|/|q|m|r|n|p|x) ;;
         *) normal_binds+=",$_key:ignore" ;;
     esac
 done

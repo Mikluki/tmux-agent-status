@@ -38,16 +38,18 @@ assert_contains '--bind="ctrl-j:down,ctrl-k:up"' "ctrl-j/k should move in both p
 # Plain letters act only in normal mode: they live in one bind set that
 # entering insert mode unbinds (see switcher-mode-bindings.sh), never as
 # standalone binds that would stop them typing into the query.
-assert_contains 'PICKER_NORMAL_HINT='"'"'i search  m pin  r rename  p preview  x close  q quit'"'" \
+assert_contains 'PICKER_NORMAL_HINT='"'"'i search  m pin  r rename  n notify  p preview  x close'"'" \
     "normal mode should advertise its letter actions"
 assert_contains 'PICKER_INSERT_HINT='"'"'esc normal  C-i pin  C-r rename  C-p preview  C-x close'"'" \
     "insert mode should advertise esc and the control-key actions"
-assert_contains 'normal_binds+=",m:$tab_bind,r:$rename_bind,p:$ctrl_p_bind,x:$close_bind"' \
+assert_contains 'normal_binds+=",m:$tab_bind,r:$rename_bind,n:$notify_bind,p:$ctrl_p_bind,x:$close_bind"' \
     "normal-mode letters should reuse the control-key actions"
+assert_contains "notify-target.sh' --toggle {2}" "n should toggle notifications for the selected agent"
 assert_contains '--bind="$normal_binds"' "normal-mode letters should be bound as one set"
 
 assert_not_contains '--bind="x:' "plain x should not be bound outside the normal-mode set"
 assert_not_contains '--bind="p:' "plain p should not be bound outside the normal-mode set"
+assert_not_contains '--bind="n:' "plain n should not be bound outside the normal-mode set"
 assert_not_contains '--bind="w:' "plain w should not be bound outside the normal-mode set"
 assert_not_contains '--bind="alt-x:' "alt-x should no longer be bound in the switcher"
 

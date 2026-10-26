@@ -3,7 +3,8 @@
 # Shared session-status helpers used by the sidebar, switcher, and other scripts.
 # Provides: is_ssh_session, has_agent_in_session, normalize_local_wait_status,
 #           status_priority, get_pane_status, get_window_status, get_agent_status,
-#           sync_session_after_child_scope_change, plus STATUS_DIR / WAIT_DIR constants.
+#           sync_session_after_child_scope_change, agent_name_for, plus
+#           STATUS_DIR / WAIT_DIR constants.
 
 _LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=require-bash4.sh
@@ -268,4 +269,19 @@ get_ssh_host() {
     if is_ssh_session "$session"; then
         echo "$session"
     fi
+}
+
+# The latest /rename name in the pane's Claude transcript, which the hook
+# records in @agent-transcript. Empty when the session was never renamed or
+# the pane runs another agent.
+agent_name_for() {
+    local pane_id="$1"
+    local transcript="" name=""
+
+    transcript=$(tmux display-message -p -t "$pane_id" '#{@agent-transcript}' 2>/dev/null || echo "")
+    [ -n "$transcript" ] && [ -r "$transcript" ] || return 0
+
+    name=$(grep -o '"customTitle":"[^"]*"' "$transcript" 2>/dev/null | tail -n1 || true)
+    name="${name#\"customTitle\":\"}"
+    printf '%s\n' "${name%\"}"
 }

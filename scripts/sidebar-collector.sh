@@ -51,6 +51,8 @@ SUMMARY_DONE=0
 SUMMARY_TOTAL=0
 SUMMARY_HAS_WORKING=0
 SUMMARY_AGENTS=()
+declare -A PREV_AGENT_STATE=()
+_NOTIFY_PRIMED=0
 
 _tab=$'\t'
 
@@ -111,6 +113,32 @@ publish_status_summary() {
     fi
 }
 
+# An agent that goes from working to done or ask has finished its turn;
+# notify-target.sh notifies if its pane has notifications on. The first
+# collect only records states, so a restart does not replay old finishes.
+notify_finished_agents() {
+    local -A seen=()
+    local entry pane state
+
+    for entry in "${SUMMARY_AGENTS[@]}"; do
+        pane="${entry%%$'\t'*}"
+        state="${entry#*$'\t'}"
+        [[ "$pane" == %* ]] || continue
+        seen[$pane]="$state"
+        if (( _NOTIFY_PRIMED )) && [ "${PREV_AGENT_STATE[$pane]:-}" = "working" ]; then
+            case "$state" in
+                done|ask) "$SCRIPT_DIR/notify-target.sh" --send "$pane" "$state" >/dev/null 2>&1 & ;;
+            esac
+        fi
+    done
+
+    PREV_AGENT_STATE=()
+    for pane in "${!seen[@]}"; do
+        PREV_AGENT_STATE[$pane]="${seen[$pane]}"
+    done
+    _NOTIFY_PRIMED=1
+}
+
 tick=0
 while true; do
     tmux list-sessions >/dev/null 2>&1 || exit 0
@@ -128,6 +156,7 @@ while true; do
         if (( _COLLECT_CHANGED )); then
             serialize_cache
             publish_status_summary
+            (( ! RUN_ONCE )) && notify_finished_agents
             (( ! RUN_ONCE )) && signal_sidebar_clients USR1 all
         fi
     fi
